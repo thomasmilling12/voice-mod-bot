@@ -81,7 +81,7 @@ export function startUserRecording(
   logger.info(`Recording ${displayName} (host=${isHost})`);
 
   const opusStream = receiver.subscribe(userId, {
-    end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
+    end: { behavior: EndBehaviorType.Manual },
   });
 
   const decoder = new prism.opus.Decoder({
@@ -93,6 +93,12 @@ export function startUserRecording(
   opusStream.pipe(decoder).pipe(rawStream);
   rawStream.stop = () => {
     try { opusStream.destroy(); } catch { }
+    setTimeout(() => {
+      try { decoder.end(); } catch { }
+      if (!rawStream.writableEnded) {
+        try { rawStream.end(); } catch { }
+      }
+    }, 100);
   };
   session.activeStreams.set(userId, rawStream);
 
@@ -113,7 +119,7 @@ export function startUserRecording(
 
       const convertWhenFinished = () => {
         if (!fs.existsSync(rawFile) || fs.statSync(rawFile).size === 0) {
-          logger.warn(`Skipped empty recording for ${displayName}`);
+          logger.warn(`Skipped empty recording for ${displayName}: no PCM audio was captured`);
           resolve("");
           return;
         }
@@ -150,6 +156,11 @@ export function startUserRecording(
 
     decoder.on("error", (err) => {
       logger.error(`Decode error for ${displayName}: ${err.message}`);
+      finishAndConvert(true);
+    });
+
+    rawStream.on("error", (err) => {
+      logger.error(`File write error for ${displayName}: ${err.message}`);
       finishAndConvert(true);
     });
   });
