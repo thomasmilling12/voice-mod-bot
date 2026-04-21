@@ -113,7 +113,24 @@ client.on(Events.Error, (err) => {
 process.on("SIGINT", () => { logger.info("Shutting down..."); client.destroy(); process.exit(0); });
 process.on("SIGTERM", () => { logger.info("Shutting down (SIGTERM)..."); client.destroy(); process.exit(0); });
 
-client.login(config.token).catch((err) => {
-  logger.error(`Login failed: ${err.message}`);
+async function main() {
+  // libsodium-wrappers uses WebAssembly and must be fully initialized before
+  // @discordjs/voice tries to use any crypto functions. Without this await,
+  // the WASM module isn't ready and Discord rejects the voice encryption
+  // negotiation within milliseconds of connecting.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sodium = require("libsodium-wrappers") as { ready: Promise<void> };
+    await sodium.ready;
+    logger.info("libsodium-wrappers WASM initialized — voice encryption ready");
+  } catch {
+    logger.warn("libsodium-wrappers not found — voice connections will fail");
+  }
+
+  await client.login(config.token);
+}
+
+main().catch((err: Error) => {
+  logger.error(`Startup failed: ${err.message}`);
   process.exit(1);
 });
