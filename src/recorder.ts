@@ -8,6 +8,8 @@ import { config } from "./config";
 import { logger } from "./logger";
 import { SpeakerStats } from "./speakerStats";
 
+type StoppableWriteStream = NodeJS.WritableStream & { stop?: () => void };
+
 export interface RecordingSession {
   guildId: string;
   channelId: string;
@@ -15,7 +17,7 @@ export interface RecordingSession {
   hostIds: Set<string>;
   files: string[];
   completedFiles: string[];
-  activeStreams: Map<string, NodeJS.WritableStream & { stop?: () => void }>;
+  activeStreams: Map<string, StoppableWriteStream>;
   conversions: Promise<string>[];
   stats: SpeakerStats;
 }
@@ -87,7 +89,7 @@ export function startUserRecording(
     channels: 2,
     rate: 48000,
   });
-  const rawStream = fs.createWriteStream(rawFile);
+  const rawStream = fs.createWriteStream(rawFile) as StoppableWriteStream;
   opusStream.pipe(decoder).pipe(rawStream);
   rawStream.stop = () => {
     try { opusStream.destroy(); } catch { }
