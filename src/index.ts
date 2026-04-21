@@ -59,7 +59,7 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   const leftChannel = !newState.channelId && !!oldState.channelId;
   const movedChannel = newState.channelId && oldState.channelId && newState.channelId !== oldState.channelId;
 
-  if ((joinedChannel || movedChannel) && !isRecording(guildId)) {
+  if (config.autoJoinEnabled && (joinedChannel || movedChannel) && !isRecording(guildId)) {
     const channel = newState.channel;
     if (!channel || channel.type !== ChannelType.GuildVoice) return;
     if (config.ignoredChannelIds.has(channel.id)) return;

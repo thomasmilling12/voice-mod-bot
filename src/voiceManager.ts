@@ -149,7 +149,7 @@ export async function joinAndRecord(
       guildId,
       adapterCreator: channel.guild.voiceAdapterCreator as unknown as DiscordGatewayAdapterCreator,
       selfDeaf: false,
-      selfMute: true,
+      selfMute: false,
     });
 
     connection.on("stateChange", (old, next) => {

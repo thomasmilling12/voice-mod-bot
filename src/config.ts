@@ -3,6 +3,7 @@ import path from "path";
 export const config = {
   token: process.env.DISCORD_BOT_TOKEN || "",
   voiceDisabled: process.env.VOICE_DISABLED === "true",
+  autoJoinEnabled: process.env.AUTO_JOIN_ENABLED === "true",
   recordingsDir: path.join(process.cwd(), "recordings"),
   maxSilenceMs: 300_000,
   reconnectCooldownMs: 10_000,
