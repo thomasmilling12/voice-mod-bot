@@ -131,23 +131,16 @@ export async function joinAndRecord(
   lastJoinAttempt.set(guildId, Date.now());
   joinInProgress.add(guildId);
 
-  // Destroy any stale voice connection left over from a previous failed attempt
+  // Destroy any stale voice connection left over from a previous failed attempt.
+  // destroy() already sends a VoiceStateUpdate(leave) to Discord — no need for
+  // a separate op:4 leave, which would cause duplicate leave signals and allow
+  // stale VOICE_SERVER_UPDATE events to arrive before the fresh join.
   const stale = getVoiceConnection(guildId);
   if (stale) {
     logger.warn(`Destroying stale voice connection for guild ${guildId} before joining`);
     try { stale.destroy(); } catch { }
+    await new Promise((r) => setTimeout(r, 300));
   }
-
-  // Explicitly tell Discord we are leaving voice first. This flushes any
-  // buffered VOICE_SERVER_UPDATE events from previous failed attempts so
-  // the fresh join receives exactly one clean update instead of a burst.
-  try {
-    channel.guild.shard?.send({
-      op: 4,
-      d: { guild_id: guildId, channel_id: null, self_mute: false, self_deaf: false },
-    });
-  } catch { /* non-critical */ }
-  await new Promise((r) => setTimeout(r, 1500));
 
   let connection: VoiceConnection;
   try {
