@@ -26,6 +26,17 @@ const activeSessions = new Map<string, RecordingSession>();
 const lastJoinAttempt = new Map<string, number>();
 const lastSessionEnd = new Map<string, number>();
 const joinInProgress = new Set<string>();
+type LastRecordingSummary = {
+  duration: string;
+  tracks: number;
+  converted: number;
+  failed: number;
+  merged: boolean;
+  uploaded: string;
+  endedAt: Date;
+};
+
+const lastRecordingByGuild = new Map<string, LastRecordingSummary>();
 
 let botClient: Client | null = null;
 
@@ -55,6 +66,10 @@ export function isRecording(guildId: string): boolean {
   return activeSessions.has(guildId);
 }
 
+export function getLastRecordingSummary(guildId: string): LastRecordingSummary | undefined {
+  return lastRecordingByGuild.get(guildId);
+}
+
 function canAttemptJoin(guildId: string): boolean {
   const last = lastJoinAttempt.get(guildId) ?? 0;
   return Date.now() - last >= config.reconnectCooldownMs;
@@ -66,9 +81,10 @@ function isInSessionCooldown(guildId: string): boolean {
 }
 
 async function postToLogChannel(guildId: string, embed: EmbedBuilder): Promise<void> {
-  if (!botClient || !config.logChannelId) return;
+  const targetChannelId = config.logChannelId ?? config.recordingChannelId;
+  if (!botClient || !targetChannelId) return;
   try {
-    const channel = await botClient.channels.fetch(config.logChannelId);
+    const channel = await botClient.channels.fetch(targetChannelId);
     if (channel instanceof TextChannel) await channel.send({ embeds: [embed] });
   } catch (err) {
     logger.warn(`Could not post to log channel: ${err}`);
@@ -80,18 +96,26 @@ function formatBytes(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
 
+type UploadResult = {
+  uploaded: number;
+  skipped: string[];
+  failed: string | null;
+};
+
 async function postRecordingFiles(
   session: RecordingSession,
   embed: EmbedBuilder,
   merged: string | null
-): Promise<void> {
-  if (!botClient || !config.recordingChannelId) return;
+): Promise<UploadResult> {
+  if (!botClient || !config.recordingChannelId) {
+    return { uploaded: 0, skipped: [], failed: "Recording channel is not configured." };
+  }
 
   try {
     const channel = await botClient.channels.fetch(config.recordingChannelId);
     if (!(channel instanceof TextChannel)) {
       logger.warn(`Recording channel ${config.recordingChannelId} is not a text channel`);
-      return;
+      return { uploaded: 0, skipped: [], failed: "Recording channel is not a text channel." };
     }
 
     const uploadLimit = config.discordUploadLimitMb * 1024 * 1024;
@@ -119,9 +143,10 @@ async function postRecordingFiles(
 
     if (uploadable.length === 0) {
       await channel.send({ embeds: [embed] });
-      return;
+      return { uploaded: 0, skipped, failed: skipped.length > 0 ? "No files were small enough for Discord upload." : null };
     }
 
+    let uploaded = 0;
     for (let i = 0; i < uploadable.length; i += 10) {
       const batch = uploadable.slice(i, i + 10);
       await channel.send({
@@ -129,9 +154,37 @@ async function postRecordingFiles(
         embeds: i === 0 ? [embed] : [],
         files: batch.map((file) => new AttachmentBuilder(file, { name: path.basename(file) })),
       });
+      uploaded += batch.length;
     }
+
+    if (config.deleteUploadedRecordings) {
+      for (const file of uploadable) {
+        try { fs.unlinkSync(file); } catch (err) { logger.warn(`Could not delete uploaded file ${file}: ${err}`); }
+      }
+      const sessionDir = getSessionDir(session);
+      try {
+        if (fs.existsSync(sessionDir) && fs.readdirSync(sessionDir).length === 0) fs.rmdirSync(sessionDir);
+      } catch (err) {
+        logger.warn(`Could not delete empty session folder ${sessionDir}: ${err}`);
+      }
+    }
+
+    return { uploaded, skipped, failed: null };
   } catch (err) {
     logger.warn(`Could not upload recording files: ${err}`);
+    return { uploaded: 0, skipped: [], failed: err instanceof Error ? err.message : String(err) };
+  }
+}
+
+async function postRecordingAlert(message: string): Promise<void> {
+  if (!botClient || !config.recordingChannelId) return;
+  try {
+    const channel = await botClient.channels.fetch(config.recordingChannelId);
+    if (channel instanceof TextChannel) {
+      await channel.send(`**Recording alert**\n${message.slice(0, 1800)}`);
+    }
+  } catch (err) {
+    logger.warn(`Could not post recording alert: ${err}`);
   }
 }
 
@@ -273,6 +326,7 @@ export async function joinAndRecord(
   });
 
   setupSilenceTimeout(guildId, connection, client);
+  setupMaxDurationTimeout(guildId, client);
 
   const hostNames = [...hostIds]
     .map((id) => channel.guild.members.cache.get(id)?.displayName ?? id)
@@ -289,6 +343,18 @@ export async function joinAndRecord(
   );
 
   return { success: true, message: `Recording started in **${channel.name}**.` };
+}
+
+function setupMaxDurationTimeout(guildId: string, client: Client): void {
+  const session = activeSessions.get(guildId);
+  if (!session || config.maxRecordingMs <= 0) return;
+  session.stopTimer = setTimeout(() => {
+    const current = activeSessions.get(guildId);
+    if (!current) return;
+    current.stopReason = `Auto-stopped after max duration (${Math.round(config.maxRecordingMs / 60_000)} minutes).`;
+    logger.warn(current.stopReason);
+    leaveAndStop(guildId, client);
+  }, config.maxRecordingMs);
 }
 
 function setupSilenceTimeout(guildId: string, connection: VoiceConnection, client: Client): void {
@@ -329,6 +395,7 @@ export async function leaveAndStop(
 
   stopAllUserRecordings(session);
   activeSessions.delete(guildId);
+  if (session.stopTimer) clearTimeout(session.stopTimer);
   lastSessionEnd.set(guildId, Date.now());
 
   const connection = getVoiceConnection(guildId);
@@ -352,6 +419,7 @@ export async function leaveAndStop(
       logger.info("Merging tracks...");
       const merged = await mergeRecordings(session);
       const sessionDir = getSessionDir(session);
+      const failedCount = Math.max(0, count - convertedCount);
 
       const hostNames = [...session.hostIds]
         .map((id) => {
@@ -363,12 +431,24 @@ export async function leaveAndStop(
       const topName = topSpeaker
         ? (c.users.cache.get(topSpeaker)?.username ?? topSpeaker)
         : "N/A";
+      const uploadedCandidates = [
+        ...(merged ? [merged] : []),
+        ...session.completedFiles.filter((file) => file !== merged),
+      ].filter((file, index, all) => file && all.indexOf(file) === index && fs.existsSync(file));
+      const totalBytes = uploadedCandidates.reduce((acc, file) => {
+        try { return acc + fs.statSync(file).size; } catch { return acc; }
+      }, 0);
+      const sizeSummary = uploadedCandidates.length > 0 ? formatBytes(totalBytes) : "0 KB";
+      const duration = `${durationMin}m ${durationSec}s`;
 
       const dmLines = [
         `**Recording complete!**`,
-        `Duration: ${durationMin}m ${durationSec}s`,
+        session.stopReason ? `Stop reason: ${session.stopReason}` : "",
+        `Duration: ${duration}`,
         `Tracks: ${count}`,
         `Converted: ${convertedCount}`,
+        failedCount > 0 ? `Failed conversions: ${failedCount}` : "",
+        `Total size: ${sizeSummary}`,
         merged ? `Merged file: \`${merged}\`` : "",
         `Session folder: \`${sessionDir}\``,
       ].filter(Boolean).join("\n");
@@ -379,16 +459,38 @@ export async function leaveAndStop(
         .setTitle("Recording Finished")
         .setColor(0xcc0000)
         .addFields(
-          { name: "Duration", value: `${durationMin}m ${durationSec}s`, inline: true },
+          { name: "Duration", value: duration, inline: true },
           { name: "Tracks", value: String(count), inline: true },
           { name: "Converted", value: String(convertedCount), inline: true },
+          { name: "Failed", value: String(failedCount), inline: true },
           { name: "Host(s)", value: hostNames || "None", inline: true },
           { name: "Top Speaker", value: topName, inline: true },
           { name: "Merged File", value: merged ? "Saved" : "Not created", inline: true },
+          { name: "Total Size", value: sizeSummary, inline: true },
+          ...(session.stopReason
+            ? [{ name: "Stop Reason", value: session.stopReason, inline: false }]
+            : []),
         )
         .setTimestamp();
 
-      await postRecordingFiles(session, completionEmbed, merged);
+      if (failedCount > 0 || !merged) {
+        await postRecordingAlert(`Finished with issues: ${failedCount} conversion(s) failed${merged ? "" : " and no merged file was created"}.`);
+      }
+
+      const uploadResult = await postRecordingFiles(session, completionEmbed, merged);
+      if (uploadResult.failed) {
+        await postRecordingAlert(`Upload problem: ${uploadResult.failed}`);
+      }
+
+      lastRecordingByGuild.set(guildId, {
+        duration,
+        tracks: count,
+        converted: convertedCount,
+        failed: failedCount,
+        merged: !!merged,
+        uploaded: `${uploadResult.uploaded} file(s)${uploadResult.skipped.length ? `, ${uploadResult.skipped.length} skipped` : ""}`,
+        endedAt: new Date(),
+      });
 
       cleanOldRecordings(config.recordingsDir, config.maxRecordingAgeDays);
     })().catch((err) => logger.error(`Post-session error: ${err}`));

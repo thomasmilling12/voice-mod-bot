@@ -3,7 +3,7 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
 } from "discord.js";
-import { getSession, isRecording } from "../voiceManager";
+import { getLastRecordingSummary, getSession, isRecording } from "../voiceManager";
 import { checkDiskSpace } from "../recorder";
 import { config } from "../config";
 
@@ -14,7 +14,28 @@ export const data = new SlashCommandBuilder()
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   const guild = interaction.guild;
   if (!guild) { await interaction.reply({ content: "Must be used in a server.", ephemeral: true }); return; }
-  if (!isRecording(guild.id)) { await interaction.reply({ content: "Not currently recording.", ephemeral: true }); return; }
+  if (!isRecording(guild.id)) {
+    const { freeGb } = checkDiskSpace(config.recordingsDir);
+    const last = getLastRecordingSummary(guild.id);
+    const embed = new EmbedBuilder()
+      .setTitle("Recording Status")
+      .setColor(0x00cc44)
+      .addFields(
+        { name: "Current Recording", value: "Not recording", inline: true },
+        { name: "Disk Free", value: `${freeGb}GB`, inline: true },
+        { name: "Max Duration", value: `${Math.round(config.maxRecordingMs / 60_000)} minutes`, inline: true },
+        ...(last
+          ? [{
+            name: "Last Recording",
+            value: `${last.duration} — ${last.converted}/${last.tracks} converted — uploaded ${last.uploaded}`,
+            inline: false,
+          }]
+          : []),
+      )
+      .setTimestamp();
+    await interaction.reply({ embeds: [embed], ephemeral: true });
+    return;
+  }
 
   const session = getSession(guild.id)!;
   const elapsed = Math.floor((Date.now() - session.startedAt.getTime()) / 1000);
@@ -42,6 +63,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       { name: "Active Speakers", value: String(session.activeStreams.size), inline: true },
       { name: "Tracks", value: String(session.files.length), inline: true },
       { name: "Disk Free", value: `${freeGb}GB`, inline: true },
+      { name: "Max Duration", value: `${Math.round(config.maxRecordingMs / 60_000)} minutes`, inline: true },
       { name: "Host(s)", value: hostNames, inline: false },
       ...(topSpeakers.length > 0
         ? [{ name: "Top Speakers", value: topSpeakers.join("\n"), inline: false }]

@@ -20,6 +20,8 @@ export interface RecordingSession {
   activeStreams: Map<string, StoppableWriteStream>;
   conversions: Promise<string>[];
   stats: SpeakerStats;
+  stopTimer?: NodeJS.Timeout;
+  stopReason?: string;
 }
 
 function ensureDir(dir: string): void {
