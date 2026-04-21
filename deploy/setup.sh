@@ -18,8 +18,8 @@ echo "==> Running as user: $BOT_USER"
 
 # ---- 1. Check Node.js ----
 if ! command -v node &>/dev/null; then
-  echo "Node.js not found. Installing via NodeSource (Node 20 LTS)..."
-  curl -fsSL https://deb.nodesource.com/setup_20.x | bash -
+  echo "Node.js not found. Installing via NodeSource (Node 22 LTS)..."
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y nodejs
 fi
 echo "Node.js: $(node --version)"
