@@ -14,6 +14,7 @@ export interface RecordingSession {
   startedAt: Date;
   hostIds: Set<string>;
   files: string[];
+  completedFiles: string[];
   activeStreams: Map<string, NodeJS.WritableStream & { stop?: () => void }>;
   conversions: Promise<string>[];
   stats: SpeakerStats;
@@ -46,6 +47,7 @@ export function createSession(
     startedAt: new Date(),
     hostIds,
     files: [],
+    completedFiles: [],
     activeStreams: new Map(),
     conversions: [],
     stats: new SpeakerStats(),
@@ -114,7 +116,10 @@ export function startUserRecording(
           return;
         }
         convertTrack(rawFile, outputFile, isHost, displayName)
-          .then(() => resolve(outputFile))
+          .then(() => {
+            session.completedFiles.push(outputFile);
+            resolve(outputFile);
+          })
           .catch((err) => {
             logger.error(`Conversion failed for ${displayName}: ${err}`);
             resolve("");
@@ -207,8 +212,13 @@ function convertTrack(
 export async function mergeRecordings(
   session: RecordingSession
 ): Promise<string | null> {
-  const validFiles = session.files.filter((f) => f && fs.existsSync(f));
-  if (validFiles.length === 0) return null;
+  const validFiles = session.completedFiles.filter((f) => f && fs.existsSync(f));
+  const missingCount = session.files.length - validFiles.length;
+  logger.info(`Merge input check: ${validFiles.length} converted track(s), ${missingCount} missing/failed track(s)`);
+  if (validFiles.length === 0) {
+    logger.warn("No converted tracks available to merge");
+    return null;
+  }
   if (validFiles.length === 1) return validFiles[0] ?? null;
 
   const sessionDir = getSessionDir(session);
@@ -231,7 +241,12 @@ export async function mergeRecordings(
     ];
 
     const ffmpeg = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
-    ffmpeg.stderr.on("data", () => {});
+    ffmpeg.stderr.on("data", (d: Buffer) => {
+      const line = d.toString().trim();
+      if (line.toLowerCase().includes("error") || line.toLowerCase().includes("invalid")) {
+        logger.warn(`ffmpeg merge: ${line}`);
+      }
+    });
 
     ffmpeg.on("close", (code) => {
       if (code === 0) {

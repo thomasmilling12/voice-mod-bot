@@ -285,6 +285,7 @@ export async function leaveAndStop(
       logger.info("Waiting for all track conversions to finish...");
       const timeout = new Promise<void>((resolve) => setTimeout(resolve, 120_000));
       await Promise.race([Promise.allSettled(session.conversions), timeout]);
+      const convertedCount = session.completedFiles.length;
 
       logger.info("Merging tracks...");
       const merged = await mergeRecordings(session);
@@ -305,6 +306,7 @@ export async function leaveAndStop(
         `**Recording complete!**`,
         `Duration: ${durationMin}m ${durationSec}s`,
         `Tracks: ${count}`,
+        `Converted: ${convertedCount}`,
         merged ? `Merged file: \`${merged}\`` : "",
         `Session folder: \`${sessionDir}\``,
       ].filter(Boolean).join("\n");
@@ -317,9 +319,10 @@ export async function leaveAndStop(
         .addFields(
           { name: "Duration", value: `${durationMin}m ${durationSec}s`, inline: true },
           { name: "Tracks", value: String(count), inline: true },
+          { name: "Converted", value: String(convertedCount), inline: true },
           { name: "Host(s)", value: hostNames || "None", inline: true },
           { name: "Top Speaker", value: topName, inline: true },
-          { name: "Merged File", value: merged ? "Saved" : "N/A (1 track)", inline: true },
+          { name: "Merged File", value: merged ? "Saved" : "Not created", inline: true },
         )
         .setTimestamp()
       );
