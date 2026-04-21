@@ -122,8 +122,9 @@ export async function joinAndRecord(
     });
     await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
   } catch (err) {
-    logger.error(`Failed to join voice channel: ${err}`);
-    return { success: false, message: "Failed to join the voice channel. Check my permissions." };
+    const detail = err instanceof Error ? err.message : String(err);
+    logger.error(`Failed to join voice channel: ${detail}`);
+    return { success: false, message: `Failed to join the voice channel (${detail}). Check the bot has Connect permission in that channel.` };
   }
 
   const session = createSession(guildId, channel.id, hostIds);
