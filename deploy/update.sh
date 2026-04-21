@@ -20,12 +20,11 @@ NODE_MAJOR=$(node -p "Number(process.versions.node.split('.')[0])")
 NODE_MINOR=$(node -p "Number(process.versions.node.split('.')[1])")
 if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 12 ]; }; then
   echo ""
-  echo "ERROR: This bot now needs Node.js 22.12+ for the current Discord voice library."
+  echo "WARNING: The current Discord voice library officially expects Node.js 22.12+."
   echo "Current Node.js version: v$NODE_VERSION"
   echo ""
-  echo "Install Node 22 on the Pi, then rerun:"
-  echo "  cd $REPO_DIR && bash deploy/update.sh"
-  exit 1
+  echo "Continuing because this Pi has already joined voice successfully on this runtime."
+  echo "Upgrade Node later to remove npm engine warnings."
 fi
 
 echo "==> Installing / updating npm packages..."
