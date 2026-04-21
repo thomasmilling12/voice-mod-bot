@@ -11,6 +11,7 @@ import { logger } from "./logger";
 import { config } from "./config";
 import { commands, registerSlashCommands } from "./commandRegistry";
 import { isRecording, getSession, joinAndRecord, leaveAndStop, setClient } from "./voiceManager";
+import { isBotAdmin, replyNotAdmin } from "./admin";
 
 const client = new Client({
   intents: [
@@ -94,6 +95,10 @@ client.on(Events.InteractionCreate, async (interaction) => {
   if (!cmd) return;
 
   try {
+    if (!isBotAdmin(interaction as ChatInputCommandInteraction)) {
+      await replyNotAdmin(interaction as ChatInputCommandInteraction);
+      return;
+    }
     await cmd.execute(interaction as ChatInputCommandInteraction);
   } catch (err) {
     logger.error(`Error in command ${interaction.commandName}: ${err}`);

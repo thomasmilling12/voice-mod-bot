@@ -102,6 +102,18 @@ type UploadResult = {
   failed: string | null;
 };
 
+function formatRecordingStamp(date: Date): string {
+  return date.toISOString().replace(/[:.]/g, "-").slice(0, 16);
+}
+
+function getUploadName(file: string, session: RecordingSession, index: number): string {
+  const stamp = formatRecordingStamp(session.startedAt);
+  const ext = path.extname(file);
+  if (path.basename(file) === "merged.mp3") return `DIFF-meet-${stamp}-merged.mp3`;
+  const role = file.includes("_host.") ? "host" : "guest";
+  return `DIFF-meet-${stamp}-track-${String(index).padStart(2, "0")}-${role}${ext}`;
+}
+
 async function postRecordingFiles(
   session: RecordingSession,
   embed: EmbedBuilder,
@@ -150,9 +162,9 @@ async function postRecordingFiles(
     for (let i = 0; i < uploadable.length; i += 10) {
       const batch = uploadable.slice(i, i + 10);
       await channel.send({
-        content: i === 0 ? "Recording files ready to download/listen:" : "Additional recording tracks:",
+        content: i === 0 ? "Recording archive entry — files are attached below for download/listening:" : "Additional recording tracks:",
         embeds: i === 0 ? [embed] : [],
-        files: batch.map((file) => new AttachmentBuilder(file, { name: path.basename(file) })),
+        files: batch.map((file, batchIndex) => new AttachmentBuilder(file, { name: getUploadName(file, session, i + batchIndex + 1) })),
       });
       uploaded += batch.length;
     }
@@ -441,6 +453,27 @@ export async function leaveAndStop(
       const duration = `${durationMin}m ${durationSec}s`;
       const safeMergedName = merged ? path.basename(merged) : null;
 
+      if (convertedCount === 0 || uploadedCandidates.length === 0) {
+        const message = `Empty recording discarded: ${duration}, ${count} track(s), ${convertedCount} converted. No usable audio was uploaded.`;
+        logger.warn(message);
+        await dmHosts(session, `**Recording discarded**\n${message}`);
+        await postRecordingAlert(message);
+        if (config.deleteUploadedRecordings) {
+          try { fs.rmSync(getSessionDir(session), { recursive: true, force: true }); } catch (err) { logger.warn(`Could not remove empty session folder: ${err}`); }
+        }
+        lastRecordingByGuild.set(guildId, {
+          duration,
+          tracks: count,
+          converted: convertedCount,
+          failed: failedCount,
+          merged: false,
+          uploaded: "0 file(s), discarded empty recording",
+          endedAt: new Date(),
+        });
+        cleanOldRecordings(config.recordingsDir, config.maxRecordingAgeDays);
+        return;
+      }
+
       const dmLines = [
         `**Recording complete!**`,
         session.stopReason ? `Stop reason: ${session.stopReason}` : "",
@@ -456,8 +489,9 @@ export async function leaveAndStop(
       await dmHosts(session, dmLines);
 
       const completionEmbed = new EmbedBuilder()
-        .setTitle("Recording Finished")
+        .setTitle("Recording Saved")
         .setColor(0xcc0000)
+        .setDescription("Download or listen from the attached files on this Discord message.")
         .addFields(
           { name: "Duration", value: duration, inline: true },
           { name: "Tracks", value: String(count), inline: true },

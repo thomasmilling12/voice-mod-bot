@@ -66,7 +66,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   if (sizeMb > 8) {
     await interaction.editReply(
-      `Clip created (${sizeMb.toFixed(1)}MB — too large to upload).\nFind it on the Pi at:\n\`\`\`${clipFile}\`\`\``
+      `Clip created (${sizeMb.toFixed(1)}MB), but it is too large to upload to Discord.`
     );
     return;
   }
