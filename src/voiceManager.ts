@@ -75,6 +75,13 @@ export async function joinAndRecord(
   hostIds: Set<string>,
   client: Client
 ): Promise<{ success: boolean; message: string }> {
+  if (config.voiceDisabled) {
+    return {
+      success: false,
+      message: "Voice recording is handled by the Pi — make sure it is online and running the bot.",
+    };
+  }
+
   const guildId = channel.guild.id;
 
   if (activeSessions.has(guildId)) {

@@ -48,6 +48,7 @@ client.once(Events.ClientReady, async (c) => {
 });
 
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
+  if (config.voiceDisabled) return;
   const guild = newState.guild ?? oldState.guild;
   const guildId = guild.id;
 
