@@ -29,6 +29,14 @@ let botClient: Client | null = null;
 
 export function setClient(client: Client): void {
   botClient = client;
+  // Log which encryption library @discordjs/voice will use
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const sod = require("sodium-native") as { sodium_version_string: () => string };
+    logger.info(`sodium-native loaded (libsodium ${sod.sodium_version_string()}) — AEAD encryption available`);
+  } catch {
+    logger.warn("sodium-native NOT loaded — falling back to tweetnacl (legacy encryption only, voice may fail)");
+  }
 }
 
 export function getSession(guildId: string): RecordingSession | undefined {
@@ -122,8 +130,18 @@ export async function joinAndRecord(
   if (stale) {
     logger.warn(`Destroying stale voice connection for guild ${guildId} before joining`);
     try { stale.destroy(); } catch { }
-    await new Promise((r) => setTimeout(r, 1500));
   }
+
+  // Explicitly tell Discord we are leaving voice first. This flushes any
+  // buffered VOICE_SERVER_UPDATE events from previous failed attempts so
+  // the fresh join receives exactly one clean update instead of a burst.
+  try {
+    channel.guild.shard?.send({
+      op: 4,
+      d: { guild_id: guildId, channel_id: null, self_mute: false, self_deaf: false },
+    });
+  } catch { /* non-critical */ }
+  await new Promise((r) => setTimeout(r, 1500));
 
   let connection: VoiceConnection;
   try {
@@ -137,6 +155,10 @@ export async function joinAndRecord(
 
     connection.on("stateChange", (old, next) => {
       logger.info(`Voice state: ${old.status} → ${next.status}`);
+    });
+
+    connection.on("debug", (msg) => {
+      logger.info(`[Voice dbg] ${msg}`);
     });
 
     await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
