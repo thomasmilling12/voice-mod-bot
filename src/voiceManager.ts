@@ -117,6 +117,14 @@ export async function joinAndRecord(
   lastJoinAttempt.set(guildId, Date.now());
   joinInProgress.add(guildId);
 
+  // Destroy any stale voice connection left over from a previous failed attempt
+  const stale = getVoiceConnection(guildId);
+  if (stale) {
+    logger.warn(`Destroying stale voice connection for guild ${guildId} before joining`);
+    try { stale.destroy(); } catch { }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+
   let connection: VoiceConnection;
   try {
     connection = joinVoiceChannel({
@@ -126,13 +134,18 @@ export async function joinAndRecord(
       selfDeaf: false,
       selfMute: true,
     });
-    await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
+
+    connection.on("stateChange", (old, next) => {
+      logger.info(`Voice state: ${old.status} → ${next.status}`);
+    });
+
+    await entersState(connection, VoiceConnectionStatus.Ready, 20_000);
   } catch (err) {
     joinInProgress.delete(guildId);
     const detail = err instanceof Error ? err.message : String(err);
     logger.error(`Failed to join voice channel: ${detail}`);
     try { connection!.destroy(); } catch { }
-    return { success: false, message: `Failed to join the voice channel (${detail}). If this keeps happening, wait 2-3 minutes for Discord to clear the stale session, then try again.` };
+    return { success: false, message: `Failed to join the voice channel (${detail}).` };
   }
 
   joinInProgress.delete(guildId);
