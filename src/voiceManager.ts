@@ -6,7 +6,9 @@ import {
   VoiceConnection,
   DiscordGatewayAdapterCreator,
 } from "@discordjs/voice";
-import { VoiceChannel, GuildMember, Client, TextChannel, EmbedBuilder } from "discord.js";
+import { VoiceChannel, GuildMember, Client, TextChannel, EmbedBuilder, AttachmentBuilder } from "discord.js";
+import fs from "fs";
+import path from "path";
 import { logger } from "./logger";
 import { config } from "./config";
 import {
@@ -70,6 +72,66 @@ async function postToLogChannel(guildId: string, embed: EmbedBuilder): Promise<v
     if (channel instanceof TextChannel) await channel.send({ embeds: [embed] });
   } catch (err) {
     logger.warn(`Could not post to log channel: ${err}`);
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+async function postRecordingFiles(
+  session: RecordingSession,
+  embed: EmbedBuilder,
+  merged: string | null
+): Promise<void> {
+  if (!botClient || !config.recordingChannelId) return;
+
+  try {
+    const channel = await botClient.channels.fetch(config.recordingChannelId);
+    if (!(channel instanceof TextChannel)) {
+      logger.warn(`Recording channel ${config.recordingChannelId} is not a text channel`);
+      return;
+    }
+
+    const uploadLimit = config.discordUploadLimitMb * 1024 * 1024;
+    const candidates = [
+      ...(merged ? [merged] : []),
+      ...session.completedFiles.filter((file) => file !== merged),
+    ].filter((file, index, all) => file && all.indexOf(file) === index && fs.existsSync(file));
+
+    const uploadable: string[] = [];
+    const skipped: string[] = [];
+
+    for (const file of candidates) {
+      const size = fs.statSync(file).size;
+      if (size <= uploadLimit) uploadable.push(file);
+      else skipped.push(`${path.basename(file)} (${formatBytes(size)})`);
+    }
+
+    if (skipped.length > 0) {
+      embed.addFields({
+        name: "Not Uploaded",
+        value: skipped.slice(0, 5).join("\n"),
+        inline: false,
+      });
+    }
+
+    if (uploadable.length === 0) {
+      await channel.send({ embeds: [embed] });
+      return;
+    }
+
+    for (let i = 0; i < uploadable.length; i += 10) {
+      const batch = uploadable.slice(i, i + 10);
+      await channel.send({
+        content: i === 0 ? "Recording files ready to download/listen:" : "Additional recording tracks:",
+        embeds: i === 0 ? [embed] : [],
+        files: batch.map((file) => new AttachmentBuilder(file, { name: path.basename(file) })),
+      });
+    }
+  } catch (err) {
+    logger.warn(`Could not upload recording files: ${err}`);
   }
 }
 
@@ -313,7 +375,7 @@ export async function leaveAndStop(
 
       await dmHosts(session, dmLines);
 
-      await postToLogChannel(guildId, new EmbedBuilder()
+      const completionEmbed = new EmbedBuilder()
         .setTitle("Recording Finished")
         .setColor(0xcc0000)
         .addFields(
@@ -324,8 +386,9 @@ export async function leaveAndStop(
           { name: "Top Speaker", value: topName, inline: true },
           { name: "Merged File", value: merged ? "Saved" : "Not created", inline: true },
         )
-        .setTimestamp()
-      );
+        .setTimestamp();
+
+      await postRecordingFiles(session, completionEmbed, merged);
 
       cleanOldRecordings(config.recordingsDir, config.maxRecordingAgeDays);
     })().catch((err) => logger.error(`Post-session error: ${err}`));

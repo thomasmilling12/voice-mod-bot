@@ -11,6 +11,8 @@ export const config = {
   maxRecordingAgeDays: parseInt(process.env.MAX_RECORDING_AGE_DAYS ?? "30"),
   diskWarningGb: parseFloat(process.env.DISK_WARNING_GB ?? "1"),
   logChannelId: process.env.LOG_CHANNEL_ID ?? null,
+  recordingChannelId: process.env.RECORDING_CHANNEL_ID ?? process.env.LOG_CHANNEL_ID ?? "1496001557290946591",
+  discordUploadLimitMb: parseFloat(process.env.DISCORD_UPLOAD_LIMIT_MB ?? "24"),
   alertChannelId: process.env.ALERT_CHANNEL_ID ?? null,
   ignoredChannelIds: new Set(
     (process.env.IGNORED_CHANNEL_IDS ?? "").split(",").filter(Boolean)
