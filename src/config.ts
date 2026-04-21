@@ -10,7 +10,7 @@ export const config = {
   reconnectCooldownMs: 10_000,
   sessionCooldownMs: parseInt(process.env.SESSION_COOLDOWN_MS ?? "60000"),
   maxRecordingAgeDays: parseInt(process.env.MAX_RECORDING_AGE_DAYS ?? "30"),
-  deleteUploadedRecordings: process.env.DELETE_UPLOADED_RECORDINGS !== "false",
+  deleteUploadedRecordings: process.env.DELETE_UPLOADED_RECORDINGS === "true",
   diskWarningGb: parseFloat(process.env.DISK_WARNING_GB ?? "1"),
   logChannelId: process.env.LOG_CHANNEL_ID ?? null,
   recordingChannelId: process.env.RECORDING_CHANNEL_ID ?? process.env.LOG_CHANNEL_ID ?? "1496001557290946591",
