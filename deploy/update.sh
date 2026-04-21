@@ -16,13 +16,13 @@ cd "$REPO_DIR"
 git pull --ff-only
 
 echo "==> Installing / updating npm packages..."
-npm install
+npm install --legacy-peer-deps
 
 echo "==> Rebuilding TypeScript..."
 npm run build
 
 echo "==> Pruning dev dependencies..."
-npm prune --omit=dev
+npm prune --omit=dev --legacy-peer-deps
 
 echo "==> Restarting $SERVICE_NAME service..."
 sudo systemctl restart "$SERVICE_NAME"

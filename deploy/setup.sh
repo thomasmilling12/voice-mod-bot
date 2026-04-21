@@ -34,13 +34,12 @@ echo "ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
 # ---- 3. Install npm dependencies ----
 echo "==> Installing npm packages..."
 cd "$REPO_DIR"
-npm install --omit=dev
+npm install --legacy-peer-deps
 
 # ---- 4. Build TypeScript ----
 echo "==> Building TypeScript..."
-npm install   # full install for dev deps needed to build
 npm run build
-npm prune --omit=dev   # clean up dev deps after build
+npm prune --omit=dev --legacy-peer-deps
 
 # ---- 5. Create .env if missing ----
 if [ ! -f "$REPO_DIR/.env" ]; then
