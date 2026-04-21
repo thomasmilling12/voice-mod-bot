@@ -35,11 +35,11 @@ echo "ffmpeg: $(ffmpeg -version 2>&1 | head -1)"
 echo "==> Installing npm packages..."
 cd "$REPO_DIR"
 npm install --legacy-peer-deps
-
-# ---- 4. Build TypeScript ----
-echo "==> Building TypeScript..."
 npm run build
 npm prune --omit=dev --legacy-peer-deps
+
+# Fix ownership so future updates run without sudo
+chown -R "$BOT_USER":"$BOT_USER" "$REPO_DIR"
 
 # ---- 5. Create .env if missing ----
 if [ ! -f "$REPO_DIR/.env" ]; then
