@@ -3,6 +3,7 @@ import { GuildMember } from "discord.js";
 import fs from "fs";
 import path from "path";
 import { spawn, execSync } from "child_process";
+import prism from "prism-media";
 import { config } from "./config";
 import { logger } from "./logger";
 import { SpeakerStats } from "./speakerStats";
@@ -13,7 +14,7 @@ export interface RecordingSession {
   startedAt: Date;
   hostIds: Set<string>;
   files: string[];
-  activeStreams: Map<string, NodeJS.WritableStream>;
+  activeStreams: Map<string, NodeJS.WritableStream & { stop?: () => void }>;
   conversions: Promise<string>[];
   stats: SpeakerStats;
 }
@@ -66,11 +67,11 @@ export function startUserRecording(
 
   const rawFile = path.join(
     sessionDir,
-    `${safeName(displayName)}_${userId}_${isHost ? "host" : "guest"}.raw.opus`
+    `${safeName(displayName)}_${userId}_${Date.now()}_${isHost ? "host" : "guest"}.raw.pcm`
   );
   const outputFile = path.join(
     sessionDir,
-    `${safeName(displayName)}_${userId}_${isHost ? "host" : "guest"}.ogg`
+    `${safeName(displayName)}_${userId}_${Date.now()}_${isHost ? "host" : "guest"}.ogg`
   );
 
   logger.info(`Recording ${displayName} (host=${isHost})`);
@@ -79,29 +80,70 @@ export function startUserRecording(
     end: { behavior: EndBehaviorType.AfterSilence, duration: 1000 },
   });
 
+  const decoder = new prism.opus.Decoder({
+    frameSize: 960,
+    channels: 2,
+    rate: 48000,
+  });
   const rawStream = fs.createWriteStream(rawFile);
-  opusStream.pipe(rawStream);
+  opusStream.pipe(decoder).pipe(rawStream);
+  rawStream.stop = () => {
+    try { opusStream.destroy(); } catch { }
+  };
   session.activeStreams.set(userId, rawStream);
 
   const conversionPromise = new Promise<string>((resolve) => {
-    opusStream.on("end", () => {
-      rawStream.end();
+    let conversionStarted = false;
+    const finishAndConvert = (forceEnd = false) => {
+      if (conversionStarted) return;
+      conversionStarted = true;
       session.activeStreams.delete(userId);
       session.stats.stopSpeaking(userId);
-      convertTrack(rawFile, outputFile, isHost, displayName)
-        .then(() => resolve(outputFile))
-        .catch((err) => {
-          logger.error(`Conversion failed for ${displayName}: ${err}`);
+
+      if (forceEnd) {
+        try { decoder.end(); } catch { }
+        if (!rawStream.writableEnded) {
+          try { rawStream.end(); } catch { }
+        }
+      }
+
+      const convertWhenFinished = () => {
+        if (!fs.existsSync(rawFile) || fs.statSync(rawFile).size === 0) {
+          logger.warn(`Skipped empty recording for ${displayName}`);
           resolve("");
-        });
+          return;
+        }
+        convertTrack(rawFile, outputFile, isHost, displayName)
+          .then(() => resolve(outputFile))
+          .catch((err) => {
+            logger.error(`Conversion failed for ${displayName}: ${err}`);
+            resolve("");
+          });
+      };
+
+      if (rawStream.writableFinished) {
+        convertWhenFinished();
+      } else {
+        rawStream.once("finish", convertWhenFinished);
+      }
+    };
+
+    opusStream.on("end", () => {
+      finishAndConvert();
+    });
+
+    opusStream.on("close", () => {
+      setTimeout(() => finishAndConvert(true), 100);
     });
 
     opusStream.on("error", (err) => {
       logger.error(`Stream error for ${displayName}: ${err.message}`);
-      rawStream.end();
-      session.activeStreams.delete(userId);
-      session.stats.stopSpeaking(userId);
-      resolve("");
+      finishAndConvert(true);
+    });
+
+    decoder.on("error", (err) => {
+      logger.error(`Decode error for ${displayName}: ${err.message}`);
+      finishAndConvert(true);
     });
   });
 
@@ -114,7 +156,7 @@ function buildFfmpegArgs(
   outputFile: string,
   isHost: boolean
 ): string[] {
-  const base = ["-y", "-f", "opus", "-i", rawFile];
+  const base = ["-y", "-f", "s16le", "-ar", "48000", "-ac", "2", "-i", rawFile];
   const noiseGate = "agate=threshold=-40dB:attack=5:release=200";
 
   if (isHost) {
@@ -205,7 +247,10 @@ export async function mergeRecordings(
 
 export function stopAllUserRecordings(session: RecordingSession): void {
   for (const [, stream] of session.activeStreams.entries()) {
-    try { stream.end(); } catch { }
+    try {
+      if (stream.stop) stream.stop();
+      else stream.end();
+    } catch { }
   }
   session.activeStreams.clear();
   logger.info(`Stopped all streams for guild ${session.guildId}`);
