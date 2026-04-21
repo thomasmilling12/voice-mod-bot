@@ -15,6 +15,19 @@ echo "==> Pulling latest changes from GitHub..."
 cd "$REPO_DIR"
 git pull --ff-only
 
+NODE_VERSION=$(node -p "process.versions.node")
+NODE_MAJOR=$(node -p "Number(process.versions.node.split('.')[0])")
+NODE_MINOR=$(node -p "Number(process.versions.node.split('.')[1])")
+if [ "$NODE_MAJOR" -lt 22 ] || { [ "$NODE_MAJOR" -eq 22 ] && [ "$NODE_MINOR" -lt 12 ]; }; then
+  echo ""
+  echo "ERROR: This bot now needs Node.js 22.12+ for the current Discord voice library."
+  echo "Current Node.js version: v$NODE_VERSION"
+  echo ""
+  echo "Install Node 22 on the Pi, then rerun:"
+  echo "  cd $REPO_DIR && bash deploy/update.sh"
+  exit 1
+fi
+
 echo "==> Installing / updating npm packages..."
 npm install --legacy-peer-deps
 
