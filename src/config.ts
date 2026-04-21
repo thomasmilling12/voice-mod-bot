@@ -21,7 +21,7 @@ export const config = {
     highpassHz: 80,
     lowpassHz: 12000,
     compressorThresholdDb: -20,
-    normalizeTarget: -3,
+    normalizeTarget: -14,
   },
 };
 
