@@ -11,6 +11,8 @@ import * as removehost from "./commands/removehost";
 import * as download from "./commands/download";
 import * as ignore from "./commands/ignore";
 import * as clip from "./commands/clip";
+import * as record from "./commands/record";
+import * as endrecord from "./commands/endrecord";
 
 export type CommandModule = {
   data: { name: string; toJSON(): object };
@@ -20,7 +22,7 @@ export type CommandModule = {
 export const commands = new Collection<string, CommandModule>();
 
 const commandList: CommandModule[] = [
-  join, leave, status, recordings, sethost, addhost, removehost, download, ignore, clip,
+  join, leave, status, recordings, sethost, addhost, removehost, download, ignore, clip, record, endrecord,
 ];
 
 for (const cmd of commandList) {
