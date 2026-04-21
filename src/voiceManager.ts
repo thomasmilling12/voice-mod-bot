@@ -32,10 +32,16 @@ export function setClient(client: Client): void {
   // Log which encryption library @discordjs/voice will use
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const sod = require("sodium-native") as { sodium_version_string: () => string };
-    logger.info(`sodium-native loaded (libsodium ${sod.sodium_version_string()}) — AEAD encryption available`);
+    require("libsodium-wrappers");
+    logger.info("libsodium-wrappers loaded — AEAD encryption available");
   } catch {
-    logger.warn("sodium-native NOT loaded — falling back to tweetnacl (legacy encryption only, voice may fail)");
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports
+      const sod = require("sodium-native") as { sodium_version_string: () => string };
+      logger.info(`sodium-native loaded (libsodium ${sod.sodium_version_string()}) — AEAD encryption available`);
+    } catch {
+      logger.warn("No AEAD crypto library loaded — voice will fail (tweetnacl only)");
+    }
   }
 }
 
