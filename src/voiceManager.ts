@@ -23,6 +23,7 @@ import {
 const activeSessions = new Map<string, RecordingSession>();
 const lastJoinAttempt = new Map<string, number>();
 const lastSessionEnd = new Map<string, number>();
+const joinInProgress = new Set<string>();
 
 let botClient: Client | null = null;
 
@@ -84,6 +85,10 @@ export async function joinAndRecord(
 
   const guildId = channel.guild.id;
 
+  if (joinInProgress.has(guildId)) {
+    return { success: false, message: "Already attempting to join — please wait a moment." };
+  }
+
   if (activeSessions.has(guildId)) {
     return { success: false, message: "Already recording in this server." };
   }
@@ -110,6 +115,7 @@ export async function joinAndRecord(
   }
 
   lastJoinAttempt.set(guildId, Date.now());
+  joinInProgress.add(guildId);
 
   let connection: VoiceConnection;
   try {
@@ -120,12 +126,16 @@ export async function joinAndRecord(
       selfDeaf: false,
       selfMute: true,
     });
-    await entersState(connection, VoiceConnectionStatus.Ready, 10_000);
+    await entersState(connection, VoiceConnectionStatus.Ready, 15_000);
   } catch (err) {
+    joinInProgress.delete(guildId);
     const detail = err instanceof Error ? err.message : String(err);
     logger.error(`Failed to join voice channel: ${detail}`);
-    return { success: false, message: `Failed to join the voice channel (${detail}). Check the bot has Connect permission in that channel.` };
+    try { connection!.destroy(); } catch { }
+    return { success: false, message: `Failed to join the voice channel (${detail}). If this keeps happening, wait 2-3 minutes for Discord to clear the stale session, then try again.` };
   }
+
+  joinInProgress.delete(guildId);
 
   const session = createSession(guildId, channel.id, hostIds);
   activeSessions.set(guildId, session);
