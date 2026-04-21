@@ -418,7 +418,6 @@ export async function leaveAndStop(
 
       logger.info("Merging tracks...");
       const merged = await mergeRecordings(session);
-      const sessionDir = getSessionDir(session);
       const failedCount = Math.max(0, count - convertedCount);
 
       const hostNames = [...session.hostIds]
@@ -440,6 +439,7 @@ export async function leaveAndStop(
       }, 0);
       const sizeSummary = uploadedCandidates.length > 0 ? formatBytes(totalBytes) : "0 KB";
       const duration = `${durationMin}m ${durationSec}s`;
+      const safeMergedName = merged ? path.basename(merged) : null;
 
       const dmLines = [
         `**Recording complete!**`,
@@ -449,8 +449,8 @@ export async function leaveAndStop(
         `Converted: ${convertedCount}`,
         failedCount > 0 ? `Failed conversions: ${failedCount}` : "",
         `Total size: ${sizeSummary}`,
-        merged ? `Merged file: \`${merged}\`` : "",
-        `Session folder: \`${sessionDir}\``,
+        safeMergedName ? `Merged file: \`${safeMergedName}\`` : "",
+        `Files are posted in <#${config.recordingChannelId}> when upload succeeds.`,
       ].filter(Boolean).join("\n");
 
       await dmHosts(session, dmLines);

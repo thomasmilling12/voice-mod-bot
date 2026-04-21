@@ -47,7 +47,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   if (sizeMb > 8) {
     await interaction.editReply(
       `The merged recording is **${sizeMb.toFixed(1)}MB** — too large to send via Discord.\n` +
-      `Find it on the Pi at:\n\`\`\`${mergedFile}\`\`\``
+      "It should already be posted in the private recording channel if it is within that channel's upload limit. If not, check the Pi directly without sharing the local file path in Discord."
     );
     return;
   }
