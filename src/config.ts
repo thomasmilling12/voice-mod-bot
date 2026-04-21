@@ -19,6 +19,12 @@ export const config = {
   adminUserIds: new Set(
     (process.env.ADMIN_USER_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean)
   ),
+  adminRoleIds: new Set(
+    (process.env.ADMIN_ROLE_IDS ?? "850391095845584937,850391378559238235,990011447193006101,1055823929358430248")
+      .split(",")
+      .map((id) => id.trim())
+      .filter(Boolean)
+  ),
   ignoredChannelIds: new Set(
     (process.env.IGNORED_CHANNEL_IDS ?? "").split(",").filter(Boolean)
   ),
