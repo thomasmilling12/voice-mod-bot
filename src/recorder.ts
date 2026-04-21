@@ -8,7 +8,7 @@ import { config } from "./config";
 import { logger } from "./logger";
 import { SpeakerStats } from "./speakerStats";
 
-type StoppableWriteStream = NodeJS.WritableStream & { stop?: () => void };
+type StoppableWriteStream = fs.WriteStream & { stop?: () => void };
 
 export interface RecordingSession {
   guildId: string;
