@@ -17,6 +17,7 @@ export interface RecordingSession {
   hostIds: Set<string>;
   files: string[];
   completedFiles: string[];
+  skippedTracks: number;
   activeStreams: Map<string, StoppableWriteStream>;
   conversions: Promise<string>[];
   stats: SpeakerStats;
@@ -52,6 +53,7 @@ export function createSession(
     hostIds,
     files: [],
     completedFiles: [],
+    skippedTracks: 0,
     activeStreams: new Map(),
     conversions: [],
     stats: new SpeakerStats(),
@@ -120,8 +122,13 @@ export function startUserRecording(
       }
 
       const convertWhenFinished = () => {
-        if (!fs.existsSync(rawFile) || fs.statSync(rawFile).size === 0) {
-          logger.warn(`Skipped empty recording for ${displayName}: no PCM audio was captured`);
+        // 1 second of 48 kHz stereo 16-bit PCM = 192 000 bytes. Skip anything shorter.
+        const MIN_BYTES = 48000 * 2 * 2;
+        const fileSize = fs.existsSync(rawFile) ? fs.statSync(rawFile).size : 0;
+        if (fileSize < MIN_BYTES) {
+          logger.warn(`Skipped short/empty recording for ${displayName}: ${fileSize} bytes (<1 s)`);
+          session.skippedTracks += 1;
+          try { fs.unlinkSync(rawFile); } catch { }
           resolve("");
           return;
         }

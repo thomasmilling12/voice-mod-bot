@@ -10,7 +10,7 @@ import type { ChatInputCommandInteraction, VoiceChannel } from "discord.js";
 import { logger } from "./logger";
 import { config } from "./config";
 import { commands, registerSlashCommands } from "./commandRegistry";
-import { isRecording, getSession, joinAndRecord, leaveAndStop, setClient } from "./voiceManager";
+import { isRecording, getSession, joinAndRecord, leaveAndStop, setClient, startWatchdog } from "./voiceManager";
 import { isBotAdmin, replyNotAdmin } from "./admin";
 
 const client = new Client({
@@ -45,6 +45,7 @@ process.on("unhandledRejection", async (reason) => {
 client.once(Events.ClientReady, async (c) => {
   logger.info(`Logged in as ${c.user.tag}`);
   setClient(c);
+  startWatchdog(c);
   await registerSlashCommands(c.user.id);
 });
 
@@ -65,7 +66,13 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
     if (!channel || channel.type !== ChannelType.GuildVoice) return;
     if (config.ignoredChannelIds.has(channel.id)) return;
 
-    logger.info(`Auto-join: ${member.displayName} joined ${channel.name}`);
+    const humanCount = (channel as VoiceChannel).members.filter((m) => !m.user.bot).size;
+    if (humanCount < config.autoJoinMinMembers) {
+      logger.info(`Auto-join skipped: only ${humanCount}/${config.autoJoinMinMembers} members in ${channel.name}`);
+      return;
+    }
+
+    logger.info(`Auto-join: ${humanCount} members in ${channel.name}, threshold met`);
     const hostIds = new Set([member.id]);
     const result = await joinAndRecord(channel as VoiceChannel, hostIds, client);
     if (result.success) logger.info(`Auto-joined ${channel.name}`);

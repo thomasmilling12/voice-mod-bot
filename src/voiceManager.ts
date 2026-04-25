@@ -41,6 +41,27 @@ const sessionCountByGuild = new Map<string, number>();
 
 let botClient: Client | null = null;
 
+export function startWatchdog(client: Client): void {
+  if (config.watchdogIntervalHours <= 0 || !config.recordingChannelId) return;
+  const intervalMs = config.watchdogIntervalHours * 60 * 60 * 1000;
+  setInterval(async () => {
+    try {
+      const channel = await client.channels.fetch(config.recordingChannelId!);
+      if (channel instanceof TextChannel) {
+        const uptimeSec = Math.floor(process.uptime());
+        const h = Math.floor(uptimeSec / 3600);
+        const m = Math.floor((uptimeSec % 3600) / 60);
+        await channel.send(
+          `**Bot heartbeat** — online and ready. Uptime: ${h}h ${m}m.`
+        );
+      }
+    } catch (err) {
+      logger.warn(`Watchdog ping failed: ${err}`);
+    }
+  }, intervalMs);
+  logger.info(`Watchdog started — pinging every ${config.watchdogIntervalHours}h`);
+}
+
 export function setClient(client: Client): void {
   botClient = client;
   // Log which encryption library @discordjs/voice will use
@@ -435,7 +456,7 @@ export async function leaveAndStop(
 
       logger.info("Merging tracks...");
       const merged = await mergeRecordings(session);
-      const failedCount = Math.max(0, count - convertedCount);
+      const failedCount = Math.max(0, count - convertedCount - session.skippedTracks);
 
       const hostNames = [...session.hostIds]
         .map((id) => {
@@ -493,6 +514,14 @@ export async function leaveAndStop(
 
       if (config.notifyHostDm) await dmHosts(session, dmLines);
 
+      const topSpeakers = session.stats.getSortedSpeakers().slice(0, 5);
+      const leaderboard = topSpeakers.length > 0
+        ? topSpeakers.map(({ userId, ms }, i) => {
+            const name = c.users.cache.get(userId)?.username ?? userId;
+            return `${i + 1}. ${name} — ${session.stats.formatDuration(ms)}`;
+          }).join("\n")
+        : "N/A";
+
       const completionEmbed = new EmbedBuilder()
         .setTitle("Recording Saved")
         .setColor(0xcc0000)
@@ -501,19 +530,18 @@ export async function leaveAndStop(
           { name: "Duration", value: duration, inline: true },
           { name: "Tracks", value: String(count), inline: true },
           { name: "Converted", value: String(convertedCount), inline: true },
-          { name: "Failed", value: String(failedCount), inline: true },
           { name: "Host(s)", value: hostNames || "None", inline: true },
-          { name: "Top Speaker", value: topName, inline: true },
           { name: "Merged File", value: merged ? "Saved" : "Not created", inline: true },
           { name: "Total Size", value: sizeSummary, inline: true },
-          ...(session.stopReason
-            ? [{ name: "Stop Reason", value: session.stopReason, inline: false }]
-            : []),
+          ...(failedCount > 0 ? [{ name: "Failed", value: String(failedCount), inline: true }] : []),
+          ...(session.skippedTracks > 0 ? [{ name: "Short tracks skipped", value: String(session.skippedTracks), inline: true }] : []),
+          ...(session.stopReason ? [{ name: "Stop Reason", value: session.stopReason, inline: false }] : []),
+          { name: "Top Speakers", value: leaderboard, inline: false },
         )
         .setTimestamp();
 
-      if (failedCount > 0 || !merged) {
-        await postRecordingAlert(`Finished with issues: ${failedCount} conversion(s) failed${merged ? "" : " and no merged file was created"}.`);
+      if (!merged && convertedCount > 0) {
+        await postRecordingAlert(`Warning: recording finished but no merged file was created.`);
       }
 
       const uploadResult = await postRecordingFiles(session, completionEmbed, merged);

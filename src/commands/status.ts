@@ -2,6 +2,8 @@ import {
   ChatInputCommandInteraction,
   SlashCommandBuilder,
   EmbedBuilder,
+  ChannelType,
+  VoiceChannel,
 } from "discord.js";
 import { getLastRecordingSummary, getSession, isRecording } from "../voiceManager";
 import { checkDiskSpace } from "../recorder";
@@ -42,10 +44,21 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const minutes = Math.floor(elapsed / 60);
   const seconds = elapsed % 60;
 
-  const channel = guild.channels.cache.get(session.channelId);
+  const voiceChannel = guild.channels.cache.get(session.channelId);
+  const channelName = voiceChannel?.name ?? session.channelId;
+
   const hostNames = [...session.hostIds]
     .map((id) => guild.members.cache.get(id)?.displayName ?? id)
     .join(", ") || "None";
+
+  // Live participants currently in the voice channel
+  let participantList = "Unknown";
+  if (voiceChannel && voiceChannel.type === ChannelType.GuildVoice) {
+    const humans = (voiceChannel as VoiceChannel).members.filter((m) => !m.user.bot);
+    participantList = humans.size > 0
+      ? [...humans.values()].map((m) => m.displayName).join(", ")
+      : "Nobody";
+  }
 
   const topSpeakers = session.stats.getSortedSpeakers().slice(0, 5).map(({ userId, ms }) => {
     const name = guild.members.cache.get(userId)?.displayName ?? userId;
@@ -58,15 +71,16 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     .setTitle("Recording Session")
     .setColor(0xff4444)
     .addFields(
-      { name: "Channel", value: channel?.name ?? session.channelId, inline: true },
+      { name: "Channel", value: channelName, inline: true },
       { name: "Duration", value: `${minutes}m ${seconds}s`, inline: true },
-      { name: "Active Speakers", value: String(session.activeStreams.size), inline: true },
+      { name: "Active Streams", value: String(session.activeStreams.size), inline: true },
       { name: "Tracks", value: String(session.files.length), inline: true },
       { name: "Disk Free", value: `${freeGb}GB`, inline: true },
       { name: "Max Duration", value: `${Math.round(config.maxRecordingMs / 60_000)} minutes`, inline: true },
       { name: "Host(s)", value: hostNames, inline: false },
+      { name: "In Channel Now", value: participantList, inline: false },
       ...(topSpeakers.length > 0
-        ? [{ name: "Top Speakers", value: topSpeakers.join("\n"), inline: false }]
+        ? [{ name: "Speaking Time", value: topSpeakers.join("\n"), inline: false }]
         : []),
     )
     .setTimestamp(session.startedAt);

@@ -4,6 +4,8 @@ export const config = {
   token: process.env.DISCORD_BOT_TOKEN || "",
   voiceDisabled: process.env.VOICE_DISABLED === "true",
   autoJoinEnabled: process.env.AUTO_JOIN_ENABLED === "true",
+  autoJoinMinMembers: parseInt(process.env.AUTO_JOIN_MIN_MEMBERS ?? "2"),
+  watchdogIntervalHours: parseFloat(process.env.WATCHDOG_INTERVAL_HOURS ?? "12"),
   recordingsDir: path.join(process.cwd(), "recordings"),
   maxSilenceMs: parseInt(process.env.MAX_SILENCE_MINUTES ?? "5") * 60_000,
   maxRecordingMs: parseInt(process.env.MAX_RECORDING_MINUTES ?? "180") * 60_000,
