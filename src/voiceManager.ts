@@ -37,6 +37,7 @@ type LastRecordingSummary = {
 };
 
 const lastRecordingByGuild = new Map<string, LastRecordingSummary>();
+const sessionCountByGuild = new Map<string, number>();
 
 let botClient: Client | null = null;
 
@@ -68,6 +69,10 @@ export function isRecording(guildId: string): boolean {
 
 export function getLastRecordingSummary(guildId: string): LastRecordingSummary | undefined {
   return lastRecordingByGuild.get(guildId);
+}
+
+export function getTotalSessionCount(guildId: string): number {
+  return sessionCountByGuild.get(guildId) ?? 0;
 }
 
 function canAttemptJoin(guildId: string): boolean {
@@ -456,7 +461,7 @@ export async function leaveAndStop(
       if (convertedCount === 0 || uploadedCandidates.length === 0) {
         const message = `Empty recording discarded: ${duration}, ${count} track(s), ${convertedCount} converted. No usable audio was uploaded.`;
         logger.warn(message);
-        await dmHosts(session, `**Recording discarded**\n${message}`);
+        if (config.notifyHostDm) await dmHosts(session, `**Recording discarded**\n${message}`);
         await postRecordingAlert(message);
         if (config.deleteUploadedRecordings) {
           try { fs.rmSync(getSessionDir(session), { recursive: true, force: true }); } catch (err) { logger.warn(`Could not remove empty session folder: ${err}`); }
@@ -486,7 +491,7 @@ export async function leaveAndStop(
         `Files are posted in <#${config.recordingChannelId}> when upload succeeds.`,
       ].filter(Boolean).join("\n");
 
-      await dmHosts(session, dmLines);
+      if (config.notifyHostDm) await dmHosts(session, dmLines);
 
       const completionEmbed = new EmbedBuilder()
         .setTitle("Recording Saved")
@@ -516,6 +521,7 @@ export async function leaveAndStop(
         await postRecordingAlert(`Upload problem: ${uploadResult.failed}`);
       }
 
+      sessionCountByGuild.set(guildId, (sessionCountByGuild.get(guildId) ?? 0) + 1);
       lastRecordingByGuild.set(guildId, {
         duration,
         tracks: count,

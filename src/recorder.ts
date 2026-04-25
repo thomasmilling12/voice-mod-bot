@@ -242,7 +242,13 @@ export async function mergeRecordings(
   return new Promise((resolve) => {
     const inputs: string[] = [];
     for (const f of validFiles) inputs.push("-i", f);
-    const filterComplex = `amix=inputs=${validFiles.length}:duration=longest:normalize=0`;
+
+    // Normalise each track individually then mix so no single speaker drowns out others.
+    // Each [N]loudnorm stream is brought to -16 LUFS before amix combines them.
+    const normParts = validFiles.map((_, i) => `[${i}]loudnorm=I=-16:TP=-1.5:LRA=11[n${i}]`).join(";");
+    const normInputs = validFiles.map((_, i) => `[n${i}]`).join("");
+    const filterComplex =
+      `${normParts};${normInputs}amix=inputs=${validFiles.length}:duration=longest:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11`;
 
     const args = [
       "-y",

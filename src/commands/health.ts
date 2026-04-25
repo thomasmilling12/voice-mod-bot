@@ -3,7 +3,7 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
 } from "discord.js";
-import { getLastRecordingSummary, getSession, isRecording } from "../voiceManager";
+import { getLastRecordingSummary, getSession, isRecording, getTotalSessionCount } from "../voiceManager";
 import { checkDiskSpace } from "../recorder";
 import { config } from "../config";
 
@@ -22,6 +22,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const recording = isRecording(guild.id);
   const { freeGb, totalGb } = checkDiskSpace(config.recordingsDir);
   const last = getLastRecordingSummary(guild.id);
+  const totalSessions = getTotalSessionCount(guild.id);
   const uptimeSeconds = Math.floor(process.uptime());
   const uptimeHours = Math.floor(uptimeSeconds / 3600);
   const uptimeMinutes = Math.floor((uptimeSeconds % 3600) / 60);
@@ -33,6 +34,8 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     { name: "Uptime", value: `${uptimeHours}h ${uptimeMinutes}m`, inline: true },
     { name: "Disk Free", value: `${freeGb}GB / ${totalGb}GB`, inline: true },
     { name: "Upload Channel", value: config.recordingChannelId ? `<#${config.recordingChannelId}>` : "Not set", inline: true },
+    { name: "Sessions (this run)", value: String(totalSessions), inline: true },
+    { name: "Host DM", value: config.notifyHostDm ? "On" : "Off", inline: true },
   ];
 
   if (session) {

@@ -1,15 +1,10 @@
-import {
-  ChatInputCommandInteraction,
-  SlashCommandBuilder,
-  EmbedBuilder,
-} from "discord.js";
-import fs from "fs";
-import path from "path";
+import { ChatInputCommandInteraction, SlashCommandBuilder, EmbedBuilder } from "discord.js";
 import { config } from "../config";
+import { getTotalSessionCount, getLastRecordingSummary } from "../voiceManager";
 
 export const data = new SlashCommandBuilder()
   .setName("recordings")
-  .setDescription("List recent recording sessions and their files.");
+  .setDescription("Show recording history and link to the archive channel.");
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.deferReply({ ephemeral: true });
@@ -17,37 +12,38 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const guild = interaction.guild;
   if (!guild) { await interaction.editReply("Must be used in a server."); return; }
 
-  const guildDir = path.join(config.recordingsDir, guild.id.replace(/[^a-zA-Z0-9_-]/g, "_"));
-  if (!fs.existsSync(guildDir)) { await interaction.editReply("No recordings found for this server yet."); return; }
+  const channelMention = config.recordingChannelId
+    ? `<#${config.recordingChannelId}>`
+    : "the private recording channel";
 
-  const sessions = fs
-    .readdirSync(guildDir)
-    .filter((d) => fs.statSync(path.join(guildDir, d)).isDirectory())
-    .sort()
-    .reverse()
-    .slice(0, 5);
+  const totalSessions = getTotalSessionCount(guild.id);
+  const last = getLastRecordingSummary(guild.id);
 
-  if (sessions.length === 0) { await interaction.editReply("No recording sessions found."); return; }
+  const embed = new EmbedBuilder()
+    .setTitle("Recording Archive")
+    .setColor(0x5865f2)
+    .setDescription(
+      `All recordings are stored in ${channelMention}.\n` +
+      "Search for messages titled **Recording Saved** to find past sessions — tracks and merged MP3s are attached directly."
+    )
+    .addFields(
+      { name: "Total Sessions", value: String(totalSessions), inline: true },
+    );
 
-  const embed = new EmbedBuilder().setTitle("Recent Recordings").setColor(0x5865f2);
-
-  for (const session of sessions) {
-    const sessionPath = path.join(guildDir, session);
-    const allFiles = fs.readdirSync(sessionPath);
-    const tracks = allFiles.filter((f) => f.endsWith(".ogg"));
-    const merged = allFiles.includes("merged.mp3");
-
-    const totalSize = [...tracks, ...(merged ? ["merged.mp3"] : [])].reduce((acc, f) => {
-      try { return acc + fs.statSync(path.join(sessionPath, f)).size; } catch { return acc; }
-    }, 0);
-    const sizeMb = (totalSize / 1024 / 1024).toFixed(1);
-
+  if (last) {
     embed.addFields({
-      name: session.replace("session_", ""),
-      value: `${tracks.length} track(s)${merged ? " + merged.mp3" : ""} — ${sizeMb}MB`,
+      name: "Last Session",
+      value: [
+        `Duration: ${last.duration}`,
+        `Tracks: ${last.tracks} (${last.converted} converted)`,
+        `Merged: ${last.merged ? "Yes" : "No"}`,
+        `Uploaded: ${last.uploaded}`,
+        `Ended: <t:${Math.floor(last.endedAt.getTime() / 1000)}:R>`,
+      ].join("\n"),
       inline: false,
     });
   }
 
+  embed.setTimestamp();
   await interaction.editReply({ embeds: [embed] });
 }
