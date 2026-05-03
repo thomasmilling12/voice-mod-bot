@@ -40,6 +40,36 @@ const lastRecordingByGuild = new Map<string, LastRecordingSummary>();
 const sessionCountByGuild = new Map<string, number>();
 const lastChannelByGuild = new Map<string, { channelId: string; channelName: string }>();
 
+const STATE_FILE = path.join(config.recordingsDir, "state.json");
+
+function loadPersistedState(): void {
+  try {
+    if (!fs.existsSync(STATE_FILE)) return;
+    const data = JSON.parse(fs.readFileSync(STATE_FILE, "utf8")) as {
+      lastChannel?: Record<string, { channelId: string; channelName: string }>;
+    };
+    if (data.lastChannel) {
+      for (const [guildId, info] of Object.entries(data.lastChannel)) {
+        lastChannelByGuild.set(guildId, info);
+      }
+      logger.info(`Loaded persisted last-channel data for ${Object.keys(data.lastChannel).length} guild(s)`);
+    }
+  } catch (err) {
+    logger.warn(`Could not load persisted state: ${err}`);
+  }
+}
+
+function savePersistedState(): void {
+  try {
+    if (!fs.existsSync(config.recordingsDir)) fs.mkdirSync(config.recordingsDir, { recursive: true });
+    const lastChannel: Record<string, { channelId: string; channelName: string }> = {};
+    for (const [guildId, info] of lastChannelByGuild.entries()) lastChannel[guildId] = info;
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ lastChannel }, null, 2), "utf8");
+  } catch (err) {
+    logger.warn(`Could not save persisted state: ${err}`);
+  }
+}
+
 let botClient: Client | null = null;
 
 export function startWatchdog(client: Client): void {
@@ -83,6 +113,7 @@ export function resumeSession(guildId: string): void {
 
 export function setClient(client: Client): void {
   botClient = client;
+  loadPersistedState();
   // Log which encryption library @discordjs/voice will use
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -366,6 +397,7 @@ export async function joinAndRecord(
   if (customDurationMinutes) session.customMaxMs = customDurationMinutes * 60_000;
   activeSessions.set(guildId, session);
   lastChannelByGuild.set(guildId, { channelId: channel.id, channelName: channel.name });
+  savePersistedState();
 
   logger.info(`Joined ${channel.name} in ${channel.guild.name}, hosts=[${[...hostIds].join(",")}]`);
 
@@ -577,6 +609,15 @@ export async function leaveAndStop(
           ...(session.skippedTracks > 0 ? [{ name: "Short tracks skipped", value: String(session.skippedTracks), inline: true }] : []),
           ...(session.stopReason ? [{ name: "Stop Reason", value: session.stopReason, inline: false }] : []),
           { name: "Top Speakers", value: leaderboard, inline: false },
+        ...(session.marks.length > 0 ? [{
+          name: `Timestamps (${session.marks.length})`,
+          value: session.marks.map((m) => {
+            const min = Math.floor(m.offsetMs / 60_000);
+            const sec = Math.floor((m.offsetMs % 60_000) / 1000);
+            return `\`${min}m ${sec}s\` — ${m.note}`;
+          }).join("\n"),
+          inline: false,
+        }] : []),
         )
         .setTimestamp();
 
@@ -608,6 +649,16 @@ export async function leaveAndStop(
         "Speaking Time",
         "-".repeat(40),
         speakerLines,
+        ...(session.marks.length > 0 ? [
+          "",
+          "Timestamps",
+          "-".repeat(40),
+          ...session.marks.map((m) => {
+            const min = Math.floor(m.offsetMs / 60_000);
+            const sec = Math.floor((m.offsetMs % 60_000) / 1000);
+            return `  ${min}m ${sec}s — ${m.note}`;
+          }),
+        ] : []),
       ].join("\n");
       const metadataBuffer = Buffer.from(metadataText, "utf8");
 

@@ -10,6 +10,12 @@ import { SpeakerStats } from "./speakerStats";
 
 type StoppableWriteStream = fs.WriteStream & { stop?: () => void };
 
+export interface SessionMark {
+  offsetMs: number;
+  note: string;
+  markedAt: Date;
+}
+
 export interface RecordingSession {
   guildId: string;
   channelId: string;
@@ -25,6 +31,7 @@ export interface RecordingSession {
   stopReason?: string;
   paused: boolean;
   customMaxMs?: number;
+  marks: SessionMark[];
 }
 
 function ensureDir(dir: string): void {
@@ -60,6 +67,7 @@ export function createSession(
     conversions: [],
     stats: new SpeakerStats(),
     paused: false,
+    marks: [],
   };
 }
 

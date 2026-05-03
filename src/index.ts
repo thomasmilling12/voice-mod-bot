@@ -63,23 +63,35 @@ client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
   const leftChannel = !newState.channelId && !!oldState.channelId;
   const movedChannel = newState.channelId && oldState.channelId && newState.channelId !== oldState.channelId;
 
-  if (config.autoJoinEnabled && (joinedChannel || movedChannel) && !isRecording(guildId)) {
+  if ((joinedChannel || movedChannel) && !isRecording(guildId)) {
     const channel = newState.channel;
     if (!channel || channel.type !== ChannelType.GuildVoice) return;
     if (config.ignoredChannelIds.has(channel.id)) return;
 
-    const humanCount = (channel as VoiceChannel).members.filter((m) => !m.user.bot).size;
-    if (humanCount < config.autoJoinMinMembers) {
-      logger.info(`Auto-join skipped: only ${humanCount}/${config.autoJoinMinMembers} members in ${channel.name}`);
+    const isHost = member.roles.cache.some((r) => config.adminRoleIds.has(r.id));
+
+    if (config.autoJoinOnHostPresence && isHost) {
+      logger.info(`Auto-join (host presence): ${member.displayName} entered ${channel.name}`);
+      const hostIds = new Set([member.id]);
+      const result = await joinAndRecord(channel as VoiceChannel, hostIds, client);
+      if (result.success) logger.info(`Auto-joined ${channel.name} on host presence`);
+      else logger.info(`Auto-join (host) skipped: ${result.message}`);
       return;
     }
 
-    logger.info(`Auto-join: ${humanCount} members in ${channel.name}, threshold met`);
-    const hostIds = new Set([member.id]);
-    const result = await joinAndRecord(channel as VoiceChannel, hostIds, client);
-    if (result.success) logger.info(`Auto-joined ${channel.name}`);
-    else logger.info(`Auto-join skipped: ${result.message}`);
-    return;
+    if (config.autoJoinEnabled) {
+      const humanCount = (channel as VoiceChannel).members.filter((m) => !m.user.bot).size;
+      if (humanCount < config.autoJoinMinMembers) {
+        logger.info(`Auto-join skipped: only ${humanCount}/${config.autoJoinMinMembers} members in ${channel.name}`);
+        return;
+      }
+      logger.info(`Auto-join: ${humanCount} members in ${channel.name}, threshold met`);
+      const hostIds = new Set([member.id]);
+      const result = await joinAndRecord(channel as VoiceChannel, hostIds, client);
+      if (result.success) logger.info(`Auto-joined ${channel.name}`);
+      else logger.info(`Auto-join skipped: ${result.message}`);
+      return;
+    }
   }
 
   if ((leftChannel || movedChannel) && isRecording(guildId)) {

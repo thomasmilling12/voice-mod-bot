@@ -5,6 +5,7 @@ export const config = {
   voiceDisabled: process.env.VOICE_DISABLED === "true",
   autoJoinEnabled: process.env.AUTO_JOIN_ENABLED === "true",
   autoJoinMinMembers: parseInt(process.env.AUTO_JOIN_MIN_MEMBERS ?? "2"),
+  autoJoinOnHostPresence: process.env.AUTO_JOIN_ON_HOST_PRESENCE === "true",
   watchdogIntervalHours: parseFloat(process.env.WATCHDOG_INTERVAL_HOURS ?? "12"),
   heartbeatChannelId: process.env.HEARTBEAT_CHANNEL_ID ?? process.env.LOG_CHANNEL_ID ?? null,
   webhookPort: parseInt(process.env.WEBHOOK_PORT ?? "9000"),
