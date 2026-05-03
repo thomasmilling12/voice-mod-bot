@@ -3,9 +3,14 @@ import {
   SlashCommandBuilder,
   EmbedBuilder,
 } from "discord.js";
+import { execSync } from "child_process";
 import { getLastRecordingSummary, getSession, isRecording, getTotalSessionCount } from "../voiceManager";
 import { checkDiskSpace } from "../recorder";
 import { config } from "../config";
+
+const gitCommit = (() => {
+  try { return execSync("git rev-parse --short HEAD", { timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { return "unknown"; }
+})();
 
 export const data = new SlashCommandBuilder()
   .setName("health")
@@ -29,13 +34,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const fields = [
     { name: "Status", value: "Online", inline: true },
-    { name: "Recording", value: recording ? "Yes" : "No", inline: true },
+    { name: "Recording", value: recording ? (session?.paused ? "Paused" : "Yes") : "No", inline: true },
     { name: "Node.js", value: process.version, inline: true },
     { name: "Uptime", value: `${uptimeHours}h ${uptimeMinutes}m`, inline: true },
     { name: "Disk Free", value: `${freeGb}GB / ${totalGb}GB`, inline: true },
     { name: "Upload Channel", value: config.recordingChannelId ? `<#${config.recordingChannelId}>` : "Not set", inline: true },
     { name: "Sessions (this run)", value: String(totalSessions), inline: true },
     { name: "Host DM", value: config.notifyHostDm ? "On" : "Off", inline: true },
+    { name: "Version", value: `\`${gitCommit}\``, inline: true },
   ];
 
   if (session) {
@@ -57,7 +63,7 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
 
   const embed = new EmbedBuilder()
     .setTitle("Bot Health")
-    .setColor(recording ? 0xff4444 : 0x00cc44)
+    .setColor(recording ? (session?.paused ? 0xff9900 : 0xff4444) : 0x00cc44)
     .addFields(fields)
     .setTimestamp();
 

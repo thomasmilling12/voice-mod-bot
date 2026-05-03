@@ -16,6 +16,7 @@ import * as endrecord from "./commands/endrecord";
 import * as health from "./commands/health";
 import * as pause from "./commands/pause";
 import * as resume from "./commands/resume";
+import * as rejoin from "./commands/rejoin";
 
 export type CommandModule = {
   data: { name: string; toJSON(): object };
@@ -25,7 +26,7 @@ export type CommandModule = {
 export const commands = new Collection<string, CommandModule>();
 
 const commandList: CommandModule[] = [
-  join, leave, status, recordings, sethost, addhost, removehost, download, ignore, clip, record, endrecord, health, pause, resume,
+  join, leave, status, recordings, sethost, addhost, removehost, download, ignore, clip, record, endrecord, health, pause, resume, rejoin,
 ];
 
 for (const cmd of commandList) {

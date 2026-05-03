@@ -38,6 +38,7 @@ type LastRecordingSummary = {
 
 const lastRecordingByGuild = new Map<string, LastRecordingSummary>();
 const sessionCountByGuild = new Map<string, number>();
+const lastChannelByGuild = new Map<string, { channelId: string; channelName: string }>();
 
 let botClient: Client | null = null;
 
@@ -112,6 +113,10 @@ export function getLastRecordingSummary(guildId: string): LastRecordingSummary |
 
 export function getTotalSessionCount(guildId: string): number {
   return sessionCountByGuild.get(guildId) ?? 0;
+}
+
+export function getLastChannel(guildId: string): { channelId: string; channelName: string } | undefined {
+  return lastChannelByGuild.get(guildId);
 }
 
 function canAttemptJoin(guildId: string): boolean {
@@ -360,6 +365,7 @@ export async function joinAndRecord(
   const session = createSession(guildId, channel.id, hostIds);
   if (customDurationMinutes) session.customMaxMs = customDurationMinutes * 60_000;
   activeSessions.set(guildId, session);
+  lastChannelByGuild.set(guildId, { channelId: channel.id, channelName: channel.name });
 
   logger.info(`Joined ${channel.name} in ${channel.guild.name}, hosts=[${[...hostIds].join(",")}]`);
 
@@ -440,7 +446,7 @@ function setupSilenceTimeout(guildId: string, connection: VoiceConnection, clien
     const session = activeSessions.get(guildId);
     if (!session) { clearInterval(interval); return; }
     const idleMs = Date.now() - lastActivity;
-    if (idleMs > config.maxSilenceMs && session.activeStreams.size === 0) {
+    if (idleMs > config.maxSilenceMs && session.activeStreams.size === 0 && !session.paused) {
       logger.info(`Silence timeout in ${guildId}, auto-leaving`);
       clearInterval(interval);
       leaveAndStop(guildId, client);
@@ -502,10 +508,6 @@ export async function leaveAndStop(
         })
         .join(", ");
 
-      const topSpeaker = session.stats.getTopSpeaker();
-      const topName = topSpeaker
-        ? (c.users.cache.get(topSpeaker)?.username ?? topSpeaker)
-        : "N/A";
       const uploadedCandidates = [
         ...(merged ? [merged] : []),
         ...session.completedFiles.filter((file) => file !== merged),

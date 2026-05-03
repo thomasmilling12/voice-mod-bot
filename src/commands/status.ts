@@ -68,12 +68,12 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const { freeGb } = checkDiskSpace(config.recordingsDir);
 
   const embed = new EmbedBuilder()
-    .setTitle("Recording Session")
-    .setColor(0xff4444)
+    .setTitle(session.paused ? "Recording Session (Paused)" : "Recording Session")
+    .setColor(session.paused ? 0xff9900 : 0xff4444)
     .addFields(
       { name: "Channel", value: channelName, inline: true },
       { name: "Duration", value: `${minutes}m ${seconds}s`, inline: true },
-      { name: "Active Streams", value: String(session.activeStreams.size), inline: true },
+      { name: "State", value: session.paused ? "⏸ Paused" : "🔴 Recording", inline: true },
       { name: "Tracks", value: String(session.files.length), inline: true },
       { name: "Disk Free", value: `${freeGb}GB`, inline: true },
       { name: "Max Duration", value: `${Math.round(config.maxRecordingMs / 60_000)} minutes`, inline: true },
