@@ -23,6 +23,8 @@ export interface RecordingSession {
   stats: SpeakerStats;
   stopTimer?: NodeJS.Timeout;
   stopReason?: string;
+  paused: boolean;
+  customMaxMs?: number;
 }
 
 function ensureDir(dir: string): void {
@@ -57,6 +59,7 @@ export function createSession(
     activeStreams: new Map(),
     conversions: [],
     stats: new SpeakerStats(),
+    paused: false,
   };
 }
 
@@ -66,6 +69,7 @@ export function startUserRecording(
   member: GuildMember | null,
   session: RecordingSession
 ): void {
+  if (session.paused) return;
   if (session.activeStreams.has(userId)) return;
 
   const isHost = session.hostIds.has(userId);

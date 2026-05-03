@@ -5,11 +5,20 @@ import {
   GuildMember,
 } from "discord.js";
 import { joinAndRecord, isRecording } from "../voiceManager";
+import { config } from "../config";
 import { logger } from "../logger";
 
 export const data = new SlashCommandBuilder()
   .setName("record")
-  .setDescription("Start recording — joins your current voice channel and sets you as host.");
+  .setDescription("Start recording — joins your current voice channel and sets you as host.")
+  .addIntegerOption((opt) =>
+    opt
+      .setName("duration")
+      .setDescription("Auto-stop after this many minutes (overrides server default)")
+      .setRequired(false)
+      .setMinValue(1)
+      .setMaxValue(480)
+  );
 
 export async function execute(interaction: ChatInputCommandInteraction): Promise<void> {
   await interaction.deferReply();
@@ -27,12 +36,24 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
   const channel = guild.channels.cache.get(member.voice.channelId) as VoiceChannel | null;
   if (!channel) { await interaction.editReply("Could not find your voice channel."); return; }
 
+  const customDuration = interaction.options.getInteger("duration") ?? undefined;
   const hostIds = new Set([member.id]);
-  logger.info(`/record: ${member.displayName} → ${channel.name}`);
+  logger.info(`/record: ${member.displayName} → ${channel.name}${customDuration ? ` (${customDuration} min)` : ""}`);
 
-  const result = await joinAndRecord(channel, hostIds, interaction.client);
-  await interaction.editReply(result.success
-    ? `Recording started in **${channel.name}**. Use \`/endrecord\` to stop.`
-    : result.message
+  const result = await joinAndRecord(channel, hostIds, interaction.client, customDuration);
+
+  if (!result.success) {
+    await interaction.editReply(result.message);
+    return;
+  }
+
+  const channelMention = config.recordingChannelId ? `<#${config.recordingChannelId}>` : "the recording channel";
+  const durationNote = customDuration
+    ? ` Auto-stops in **${customDuration} min**.`
+    : "";
+
+  await interaction.editReply(
+    `Recording started in **${channel.name}**.${durationNote}\n` +
+    `Files will be posted in ${channelMention} when done. Use \`/endrecord\` to stop early.`
   );
 }

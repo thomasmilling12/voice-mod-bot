@@ -42,24 +42,42 @@ const sessionCountByGuild = new Map<string, number>();
 let botClient: Client | null = null;
 
 export function startWatchdog(client: Client): void {
-  if (config.watchdogIntervalHours <= 0 || !config.recordingChannelId) return;
+  if (config.watchdogIntervalHours <= 0) return;
+  if (!config.heartbeatChannelId) {
+    logger.info("Watchdog enabled but HEARTBEAT_CHANNEL_ID not set — heartbeats logged locally only");
+  }
   const intervalMs = config.watchdogIntervalHours * 60 * 60 * 1000;
   setInterval(async () => {
+    const uptimeSec = Math.floor(process.uptime());
+    const h = Math.floor(uptimeSec / 3600);
+    const m = Math.floor((uptimeSec % 3600) / 60);
+    logger.info(`Heartbeat — uptime ${h}h ${m}m`);
+    if (!config.heartbeatChannelId) return;
     try {
-      const channel = await client.channels.fetch(config.recordingChannelId!);
+      const channel = await client.channels.fetch(config.heartbeatChannelId);
       if (channel instanceof TextChannel) {
-        const uptimeSec = Math.floor(process.uptime());
-        const h = Math.floor(uptimeSec / 3600);
-        const m = Math.floor((uptimeSec % 3600) / 60);
-        await channel.send(
-          `**Bot heartbeat** — online and ready. Uptime: ${h}h ${m}m.`
-        );
+        await channel.send(`**Bot heartbeat** — online and ready. Uptime: ${h}h ${m}m.`);
       }
     } catch (err) {
       logger.warn(`Watchdog ping failed: ${err}`);
     }
   }, intervalMs);
   logger.info(`Watchdog started — pinging every ${config.watchdogIntervalHours}h`);
+}
+
+export function pauseSession(guildId: string): void {
+  const session = activeSessions.get(guildId);
+  if (!session) return;
+  session.paused = true;
+  stopAllUserRecordings(session);
+  logger.info(`Recording paused for guild ${guildId}`);
+}
+
+export function resumeSession(guildId: string): void {
+  const session = activeSessions.get(guildId);
+  if (!session) return;
+  session.paused = false;
+  logger.info(`Recording resumed for guild ${guildId}`);
 }
 
 export function setClient(client: Client): void {
@@ -137,13 +155,20 @@ function getUploadName(file: string, session: RecordingSession, index: number): 
   const ext = path.extname(file);
   if (path.basename(file) === "merged.mp3") return `DIFF-meet-${stamp}-merged.mp3`;
   const role = file.includes("_host.") ? "host" : "guest";
-  return `DIFF-meet-${stamp}-track-${String(index).padStart(2, "0")}-${role}${ext}`;
+  // Local filename format: safeName(displayName)_userId_timestamp_role.ext
+  // Extract display name by finding the Discord snowflake (17-20 digit number)
+  const baseName = path.basename(file, ext);
+  const parts = baseName.split("_");
+  const userIdIdx = parts.findIndex((p) => /^\d{17,20}$/.test(p));
+  const displayPart = userIdIdx > 0 ? parts.slice(0, userIdIdx).join("-") : "user";
+  return `DIFF-meet-${stamp}-track-${String(index).padStart(2, "0")}-${role}-${displayPart}${ext}`;
 }
 
 async function postRecordingFiles(
   session: RecordingSession,
   embed: EmbedBuilder,
-  merged: string | null
+  merged: string | null,
+  metadataBuffer?: Buffer
 ): Promise<UploadResult> {
   if (!botClient || !config.recordingChannelId) {
     return { uploaded: 0, skipped: [], failed: "Recording channel is not configured." };
@@ -184,13 +209,20 @@ async function postRecordingFiles(
       return { uploaded: 0, skipped, failed: skipped.length > 0 ? "No files were small enough for Discord upload." : null };
     }
 
+    const stamp = formatRecordingStamp(session.startedAt);
     let uploaded = 0;
     for (let i = 0; i < uploadable.length; i += 10) {
       const batch = uploadable.slice(i, i + 10);
+      const extraFiles = i === 0 && metadataBuffer
+        ? [new AttachmentBuilder(metadataBuffer, { name: `DIFF-meet-${stamp}-summary.txt` })]
+        : [];
       await channel.send({
         content: i === 0 ? "Recording archive entry — files are attached below for download/listening:" : "Additional recording tracks:",
         embeds: i === 0 ? [embed] : [],
-        files: batch.map((file, batchIndex) => new AttachmentBuilder(file, { name: getUploadName(file, session, i + batchIndex + 1) })),
+        files: [
+          ...extraFiles,
+          ...batch.map((file, batchIndex) => new AttachmentBuilder(file, { name: getUploadName(file, session, i + batchIndex + 1) })),
+        ],
       });
       uploaded += batch.length;
     }
@@ -241,7 +273,8 @@ async function dmHosts(session: RecordingSession, message: string): Promise<void
 export async function joinAndRecord(
   channel: VoiceChannel,
   hostIds: Set<string>,
-  client: Client
+  client: Client,
+  customDurationMinutes?: number
 ): Promise<{ success: boolean; message: string }> {
   if (config.voiceDisabled) {
     return {
@@ -325,6 +358,7 @@ export async function joinAndRecord(
   joinInProgress.delete(guildId);
 
   const session = createSession(guildId, channel.id, hostIds);
+  if (customDurationMinutes) session.customMaxMs = customDurationMinutes * 60_000;
   activeSessions.set(guildId, session);
 
   logger.info(`Joined ${channel.name} in ${channel.guild.name}, hosts=[${[...hostIds].join(",")}]`);
@@ -356,10 +390,12 @@ export async function joinAndRecord(
   });
 
   connection.on(VoiceConnectionStatus.Destroyed, () => {
-    const s = activeSessions.get(guildId);
-    if (s) {
-      stopAllUserRecordings(s);
-      activeSessions.delete(guildId);
+    // leaveAndStop deletes the session before calling destroy(), so if the
+    // session still exists here the connection was destroyed externally (bot
+    // kicked, server outage, etc.). Salvage the recording.
+    if (activeSessions.has(guildId)) {
+      logger.warn(`Connection destroyed externally for ${guildId} — salvaging recording`);
+      leaveAndStop(guildId, botClient ?? undefined);
     }
   });
 
@@ -385,14 +421,15 @@ export async function joinAndRecord(
 
 function setupMaxDurationTimeout(guildId: string, client: Client): void {
   const session = activeSessions.get(guildId);
-  if (!session || config.maxRecordingMs <= 0) return;
+  const maxMs = session?.customMaxMs ?? config.maxRecordingMs;
+  if (!session || maxMs <= 0) return;
   session.stopTimer = setTimeout(() => {
     const current = activeSessions.get(guildId);
     if (!current) return;
-    current.stopReason = `Auto-stopped after max duration (${Math.round(config.maxRecordingMs / 60_000)} minutes).`;
+    current.stopReason = `Auto-stopped after max duration (${Math.round(maxMs / 60_000)} minutes).`;
     logger.warn(current.stopReason);
     leaveAndStop(guildId, client);
-  }, config.maxRecordingMs);
+  }, maxMs);
 }
 
 function setupSilenceTimeout(guildId: string, connection: VoiceConnection, client: Client): void {
@@ -544,7 +581,34 @@ export async function leaveAndStop(
         await postRecordingAlert(`Warning: recording finished but no merged file was created.`);
       }
 
-      const uploadResult = await postRecordingFiles(session, completionEmbed, merged);
+      // Generate metadata summary text file
+      const allSpeakers = session.stats.getSortedSpeakers();
+      const speakerLines = allSpeakers.length > 0
+        ? allSpeakers.map(({ userId, ms }, i) => {
+            const name = c.users.cache.get(userId)?.username ?? userId;
+            return `  ${i + 1}. ${name} — ${session.stats.formatDuration(ms)}`;
+          }).join("\n")
+        : "  (no speaker data)";
+
+      const metadataText = [
+        "DIFF Car Meet Recording",
+        "=".repeat(40),
+        `Date:      ${session.startedAt.toUTCString()}`,
+        `Duration:  ${duration}`,
+        `Host(s):   ${hostNames || "None"}`,
+        `Channel:   ${session.guildId}`,
+        `Tracks:    ${count} recorded, ${convertedCount} converted, ${session.skippedTracks} short-skipped, ${failedCount} failed`,
+        `Merged:    ${merged ? "Yes" : "No"}`,
+        `Total size: ${sizeSummary}`,
+        ...(session.stopReason ? [`Stop reason: ${session.stopReason}`] : []),
+        "",
+        "Speaking Time",
+        "-".repeat(40),
+        speakerLines,
+      ].join("\n");
+      const metadataBuffer = Buffer.from(metadataText, "utf8");
+
+      const uploadResult = await postRecordingFiles(session, completionEmbed, merged, metadataBuffer);
       if (uploadResult.failed) {
         await postRecordingAlert(`Upload problem: ${uploadResult.failed}`);
       }

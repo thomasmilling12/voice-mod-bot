@@ -11,6 +11,7 @@ import { logger } from "./logger";
 import { config } from "./config";
 import { commands, registerSlashCommands } from "./commandRegistry";
 import { isRecording, getSession, joinAndRecord, leaveAndStop, setClient, startWatchdog } from "./voiceManager";
+import { startWebhookServer } from "./webhook";
 import { isBotAdmin, replyNotAdmin } from "./admin";
 
 const client = new Client({
@@ -46,6 +47,7 @@ client.once(Events.ClientReady, async (c) => {
   logger.info(`Logged in as ${c.user.tag}`);
   setClient(c);
   startWatchdog(c);
+  startWebhookServer();
   await registerSlashCommands(c.user.id);
 });
 
