@@ -23,6 +23,8 @@ export const config = {
   recordingChannelId: process.env.RECORDING_CHANNEL_ID ?? process.env.LOG_CHANNEL_ID ?? "1496001557290946591",
   discordUploadLimitMb: parseFloat(process.env.DISCORD_UPLOAD_LIMIT_MB ?? "24"),
   alertChannelId: process.env.ALERT_CHANNEL_ID ?? null,
+  announceChannelId: process.env.ANNOUNCE_CHANNEL_ID ?? null,
+  trimSilence: process.env.TRIM_SILENCE === "true",
   adminUserIds: new Set(
     (process.env.ADMIN_USER_IDS ?? "").split(",").map((id) => id.trim()).filter(Boolean)
   ),

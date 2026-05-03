@@ -17,6 +17,7 @@ import {
   startUserRecording,
   stopAllUserRecordings,
   mergeRecordings,
+  trimSilence,
   cleanOldRecordings,
   checkDiskSpace,
   getSessionDir,
@@ -168,6 +169,16 @@ async function postToLogChannel(guildId: string, embed: EmbedBuilder): Promise<v
     if (channel instanceof TextChannel) await channel.send({ embeds: [embed] });
   } catch (err) {
     logger.warn(`Could not post to log channel: ${err}`);
+  }
+}
+
+async function postToAnnounceChannel(message: string): Promise<void> {
+  if (!botClient || !config.announceChannelId) return;
+  try {
+    const channel = await botClient.channels.fetch(config.announceChannelId);
+    if (channel instanceof TextChannel) await channel.send(message);
+  } catch (err) {
+    logger.warn(`Could not post to announce channel: ${err}`);
   }
 }
 
@@ -423,8 +434,24 @@ export async function joinAndRecord(
         entersState(connection, VoiceConnectionStatus.Connecting, 5_000),
       ]);
     } catch {
-      logger.error(`Could not recover voice connection for ${guildId}`);
+      logger.error(`Could not recover voice connection for ${guildId} — salvaging and attempting rejoin`);
+      const savedHostIds = new Set(session.hostIds);
+      const savedChannel = channel;
       await leaveAndStop(guildId, client);
+      // Wait briefly then try one automatic rejoin
+      await new Promise<void>((r) => setTimeout(r, 6_000));
+      if (!activeSessions.has(guildId)) {
+        const rejoinResult = await joinAndRecord(savedChannel, savedHostIds, client ?? botClient!);
+        if (rejoinResult.success) {
+          logger.info(`Auto-rejoined ${savedChannel.name} after network drop`);
+          await postToAnnounceChannel(
+            `⚠️ Bot was disconnected from **${savedChannel.name}** and has automatically rejoined. Recording continues.`
+          );
+        } else {
+          logger.error(`Auto-rejoin failed: ${rejoinResult.message}`);
+          await postRecordingAlert(`Disconnected from **${savedChannel.name}** — could not rejoin. Previous recording was saved.`);
+        }
+      }
     }
   });
 
@@ -453,6 +480,10 @@ export async function joinAndRecord(
       { name: "Host(s)", value: hostNames || "None set", inline: true },
     )
     .setTimestamp()
+  );
+
+  await postToAnnounceChannel(
+    `🔴 **Recording has started** in **${channel.name}** — you are being recorded.`
   );
 
   return { success: true, message: `Recording started in **${channel.name}**.` };
@@ -531,7 +562,11 @@ export async function leaveAndStop(
       const convertedCount = session.completedFiles.length;
 
       logger.info("Merging tracks...");
-      const merged = await mergeRecordings(session);
+      let merged = await mergeRecordings(session);
+      if (merged && config.trimSilence) {
+        logger.info("Trimming silence from merged file...");
+        merged = await trimSilence(merged);
+      }
       const failedCount = Math.max(0, count - convertedCount - session.skippedTracks);
 
       const hostNames = [...session.hostIds]
@@ -640,7 +675,7 @@ export async function leaveAndStop(
         `Date:      ${session.startedAt.toUTCString()}`,
         `Duration:  ${duration}`,
         `Host(s):   ${hostNames || "None"}`,
-        `Channel:   ${session.guildId}`,
+        `Channel:   ${lastChannelByGuild.get(guildId)?.channelName ?? session.channelId}`,
         `Tracks:    ${count} recorded, ${convertedCount} converted, ${session.skippedTracks} short-skipped, ${failedCount} failed`,
         `Merged:    ${merged ? "Yes" : "No"}`,
         `Total size: ${sizeSummary}`,

@@ -243,6 +243,36 @@ function convertTrack(
   });
 }
 
+export async function trimSilence(mergedFile: string): Promise<string> {
+  const dir = path.dirname(mergedFile);
+  const ext = path.extname(mergedFile);
+  const trimmedFile = path.join(dir, `merged-trimmed${ext}`);
+  return new Promise((resolve) => {
+    const args = [
+      "-y", "-i", mergedFile,
+      "-af", "silenceremove=start_periods=1:start_silence=0.3:start_threshold=-50dB:stop_periods=-1:stop_duration=2:stop_threshold=-50dB",
+      "-codec:a", "libmp3lame", "-q:a", "3",
+      trimmedFile,
+    ];
+    const ffmpeg = spawn("ffmpeg", args, { stdio: ["ignore", "pipe", "pipe"] });
+    ffmpeg.stderr.on("data", (d: Buffer) => {
+      const line = d.toString().trim();
+      if (line.toLowerCase().includes("error")) logger.warn(`ffmpeg trim-silence: ${line}`);
+    });
+    ffmpeg.on("close", (code) => {
+      if (code === 0) {
+        try { fs.unlinkSync(mergedFile); } catch { }
+        try { fs.renameSync(trimmedFile, mergedFile); } catch { }
+        logger.info(`Silence trimmed: ${mergedFile}`);
+      } else {
+        logger.warn("Silence trim failed — using untrimmed file");
+        try { fs.unlinkSync(trimmedFile); } catch { }
+      }
+      resolve(mergedFile);
+    });
+  });
+}
+
 export async function mergeRecordings(
   session: RecordingSession
 ): Promise<string | null> {
