@@ -367,8 +367,9 @@ export async function joinAndRecord(
 
   receiver.speaking.on("start", (userId) => {
     if (session.activeStreams.has(userId)) return;
-    session.stats.startSpeaking(userId);
     const member = channel.guild.members.cache.get(userId) as GuildMember | null;
+    if (member?.user.bot) return;
+    session.stats.startSpeaking(userId);
     startUserRecording(receiver, userId, member, session);
   });
 
