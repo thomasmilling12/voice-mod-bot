@@ -629,6 +629,11 @@ export async function leaveAndStop(
           }).join("\n")
         : "N/A";
 
+      const allRecorded = session.stats.getSortedSpeakers();
+      const participantsList = allRecorded.length > 0
+        ? allRecorded.map(({ userId }) => c.users.cache.get(userId)?.username ?? userId).join(", ")
+        : "None";
+
       const completionEmbed = new EmbedBuilder()
         .setTitle("Recording Saved")
         .setColor(0xcc0000)
@@ -643,6 +648,7 @@ export async function leaveAndStop(
           ...(failedCount > 0 ? [{ name: "Failed", value: String(failedCount), inline: true }] : []),
           ...(session.skippedTracks > 0 ? [{ name: "Short tracks skipped", value: String(session.skippedTracks), inline: true }] : []),
           ...(session.stopReason ? [{ name: "Stop Reason", value: session.stopReason, inline: false }] : []),
+          { name: "Participants Recorded", value: participantsList, inline: false },
           { name: "Top Speakers", value: leaderboard, inline: false },
         ...(session.marks.length > 0 ? [{
           name: `Timestamps (${session.marks.length})`,

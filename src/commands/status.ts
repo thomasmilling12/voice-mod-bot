@@ -65,6 +65,14 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
     return `${name}: ${session.stats.formatDuration(ms)}`;
   });
 
+  const marksText = session.marks.length > 0
+    ? session.marks.map((m) => {
+        const min = Math.floor(m.offsetMs / 60_000);
+        const sec = Math.floor((m.offsetMs % 60_000) / 1000);
+        return `\`${min}m ${sec}s\` — ${m.note}`;
+      }).join("\n")
+    : null;
+
   const { freeGb } = checkDiskSpace(config.recordingsDir);
 
   const embed = new EmbedBuilder()
@@ -81,6 +89,9 @@ export async function execute(interaction: ChatInputCommandInteraction): Promise
       { name: "In Channel Now", value: participantList, inline: false },
       ...(topSpeakers.length > 0
         ? [{ name: "Speaking Time", value: topSpeakers.join("\n"), inline: false }]
+        : []),
+      ...(marksText
+        ? [{ name: `Timestamps (${session.marks.length})`, value: marksText, inline: false }]
         : []),
     )
     .setTimestamp(session.startedAt);
