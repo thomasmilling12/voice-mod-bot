@@ -1,6 +1,6 @@
 [Unit]
 Description=Discord Voice Mod Recorder Bot
-After=network-online.target
+After=network.target network-online.target
 Wants=network-online.target
 
 [Service]
@@ -8,10 +8,10 @@ Type=simple
 User=pi
 WorkingDirectory=/home/pi/voice-mod-bot
 ExecStart=/usr/bin/node /home/pi/voice-mod-bot/dist/index.js
-Restart=on-failure
-RestartSec=10
-StartLimitInterval=60
-StartLimitBurst=5
+Restart=always
+RestartSec=15
+StartLimitIntervalSec=600
+StartLimitBurst=10
 
 Environment=NODE_ENV=production
 Environment=PATH=/usr/local/bin:/usr/bin:/bin
