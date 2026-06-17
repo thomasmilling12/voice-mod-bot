@@ -27,6 +27,7 @@ const activeSessions = new Map<string, RecordingSession>();
 const lastJoinAttempt = new Map<string, number>();
 const lastSessionEnd = new Map<string, number>();
 const joinInProgress = new Set<string>();
+const scheduledTimers = new Map<string, NodeJS.Timeout>();
 type LastRecordingSummary = {
   duration: string;
   tracks: number;
@@ -149,6 +150,36 @@ export function getTotalSessionCount(guildId: string): number {
 
 export function getLastChannel(guildId: string): { channelId: string; channelName: string } | undefined {
   return lastChannelByGuild.get(guildId);
+}
+
+export function scheduleRecording(
+  guildId: string,
+  channel: VoiceChannel,
+  hostIds: Set<string>,
+  delayMs: number,
+  client: Client
+): void {
+  cancelSchedule(guildId);
+  const timer = setTimeout(async () => {
+    scheduledTimers.delete(guildId);
+    if (activeSessions.has(guildId)) return;
+    const result = await joinAndRecord(channel, hostIds, client);
+    if (!result.success) logger.warn(`Scheduled recording failed: ${result.message}`);
+  }, delayMs);
+  scheduledTimers.set(guildId, timer);
+  logger.info(`Recording scheduled for ${channel.name} in ${Math.round(delayMs / 60_000)}m`);
+}
+
+export function cancelSchedule(guildId: string): boolean {
+  const timer = scheduledTimers.get(guildId);
+  if (!timer) return false;
+  clearTimeout(timer);
+  scheduledTimers.delete(guildId);
+  return true;
+}
+
+export function hasSchedule(guildId: string): boolean {
+  return scheduledTimers.has(guildId);
 }
 
 function canAttemptJoin(guildId: string): boolean {

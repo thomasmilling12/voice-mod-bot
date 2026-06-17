@@ -5,14 +5,20 @@ import {
   Events,
   ChannelType,
   TextChannel,
+  EmbedBuilder,
 } from "discord.js";
 import type { ChatInputCommandInteraction, VoiceChannel } from "discord.js";
+import { execSync } from "child_process";
 import { logger } from "./logger";
 import { config } from "./config";
 import { commands, registerSlashCommands } from "./commandRegistry";
 import { isRecording, getSession, joinAndRecord, leaveAndStop, setClient, startWatchdog } from "./voiceManager";
 import { startWebhookServer } from "./webhook";
 import { isBotAdmin, replyNotAdmin } from "./admin";
+
+const gitCommit = (() => {
+  try { return execSync("git rev-parse --short HEAD", { timeout: 2000, stdio: ["ignore", "pipe", "ignore"] }).toString().trim(); } catch { return "unknown"; }
+})();
 
 const client = new Client({
   intents: [
@@ -49,6 +55,27 @@ client.once(Events.ClientReady, async (c) => {
   startWatchdog(c);
   startWebhookServer();
   await registerSlashCommands(c.user.id);
+
+  const announceChannelId = config.heartbeatChannelId ?? config.logChannelId;
+  if (announceChannelId) {
+    try {
+      const ch = await c.channels.fetch(announceChannelId);
+      if (ch instanceof TextChannel) {
+        await ch.send({
+          embeds: [
+            new EmbedBuilder()
+              .setTitle("✅ Bot Online")
+              .setColor(0x00cc44)
+              .setDescription(`**${c.user.tag}** has connected and is ready.`)
+              .addFields({ name: "Version", value: `\`${gitCommit}\``, inline: true })
+              .setTimestamp(),
+          ],
+        });
+      }
+    } catch (err) {
+      logger.warn(`Could not post startup announcement: ${err}`);
+    }
+  }
 });
 
 client.on(Events.VoiceStateUpdate, async (oldState, newState) => {
